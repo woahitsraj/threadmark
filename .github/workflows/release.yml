@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    strategy:
+      matrix:
+        include:
+          - runner: macos-26
+            arch: arm64
+          - runner: macos-26-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Validate version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          plist_version="$(plutil -extract CFBundleShortVersionString raw Resources/Info.plist)"
+          test "$version" = "$plist_version"
+      - name: Build app bundle
+        run: ./scripts/build-app.sh
+      - name: Verify architecture and signature
+        run: |
+          binary="dist/T3 Menubar.app/Contents/MacOS/T3MenuBar"
+          test "$(lipo -archs "$binary")" = "${{ matrix.arch }}"
+          codesign --verify --deep --strict "dist/T3 Menubar.app"
+      - name: Package release
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p release
+          archive="T3-Menubar-${version}-macOS-${{ matrix.arch }}.zip"
+          ditto -c -k --keepParent "dist/T3 Menubar.app" "release/$archive"
+          cd release
+          shasum -a 256 "$archive" > "$archive.sha256"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.arch }}
+          path: release/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+      - name: Create checksum manifest
+        run: |
+          cat release/*.sha256 > release/SHA256SUMS
+          rm release/*.sha256
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            release/*.zip \
+            release/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes
