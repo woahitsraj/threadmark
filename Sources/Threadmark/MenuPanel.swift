@@ -155,6 +155,14 @@ private struct ActivityList: View {
                     HStack(spacing: 14) {
                         Label("\(model.activeCount) working", systemImage: "bolt.fill")
                             .foregroundStyle(.blue)
+                        if model.approvalCount > 0 {
+                            Label(
+                                model.approvalCount == 1 ? "1 approval" : "\(model.approvalCount) approvals",
+                                systemImage: "checkmark.shield.fill"
+                            )
+                                .foregroundStyle(.orange)
+                                .help("Waiting for approval")
+                        }
                         Label("\(model.doneCount) done", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(.green)
                         Spacer()

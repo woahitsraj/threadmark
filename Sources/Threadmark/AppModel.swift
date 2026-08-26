@@ -54,8 +54,8 @@ final class AppModel: ObservableObject {
         activities.filter { [.starting, .running].contains($0.phase) }.count
     }
 
-    var attentionCount: Int {
-        activities.filter { [.waitingForApproval, .waitingForInput, .failed].contains($0.phase) }.count
+    var approvalCount: Int {
+        activities.filter { $0.phase == .waitingForApproval }.count
     }
 
     var doneCount: Int {
