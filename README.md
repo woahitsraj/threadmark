@@ -64,6 +64,8 @@ To publish a release:
 2. Commit the version change.
 3. Create and push the matching tag, such as `v0.1.0`.
 
+If GitHub delays the tag event, open the Release workflow in Actions, choose Run workflow, and enter the existing tag.
+
 Release builds are ad hoc signed but not notarized. Public distribution without macOS security warnings requires an Apple Developer ID certificate and notarization credentials.
 
 ## Current limits
