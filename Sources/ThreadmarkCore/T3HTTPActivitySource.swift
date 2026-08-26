@@ -54,7 +54,7 @@ public actor T3HTTPActivitySource: ActivitySource {
 
     private let session: URLSession
     private let decoder = JSONDecoder()
-    private let logger = Logger(subsystem: "com.rajan.t3menubar", category: "network")
+    private let logger = Logger(subsystem: "com.rajan.threadmark", category: "network")
     private var changeRequestCache: [LinkedPullRequest: CachedChangeRequest] = [:]
     private var vcsStatusCache: [String: CachedVCSStatus] = [:]
     private let changeRequestCacheLifetime: TimeInterval = 15
@@ -346,7 +346,7 @@ public actor T3HTTPActivitySource: ActivitySource {
             ("subject_token_type", "urn:t3:params:oauth:token-type:environment-bootstrap"),
             ("requested_token_type", "urn:ietf:params:oauth:token-type:access_token"),
             ("scope", "orchestration:read"),
-            ("client_label", "T3 Menubar"),
+            ("client_label", "Threadmark"),
             ("client_device_type", "desktop"),
             ("client_os", "macOS"),
         ])

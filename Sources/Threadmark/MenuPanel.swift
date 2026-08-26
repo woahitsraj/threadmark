@@ -1,5 +1,5 @@
 import SwiftUI
-import T3MenuBarCore
+import ThreadmarkCore
 
 struct MenuPanel: View {
     @ObservedObject var model: AppModel
@@ -44,7 +44,7 @@ private struct Header: View {
             .frame(width: 32, height: 32)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("T3 Menubar")
+                Text("Threadmark")
                     .font(.headline)
                 Text(model.connection?.label ?? "Mac activity monitor")
                     .font(.caption)

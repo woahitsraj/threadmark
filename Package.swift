@@ -3,21 +3,21 @@
 import PackageDescription
 
 let package = Package(
-    name: "T3MenuBar",
+    name: "Threadmark",
     platforms: [.macOS(.v14)],
     products: [
-        .library(name: "T3MenuBarCore", targets: ["T3MenuBarCore"]),
-        .executable(name: "T3MenuBar", targets: ["T3MenuBar"]),
+        .library(name: "ThreadmarkCore", targets: ["ThreadmarkCore"]),
+        .executable(name: "Threadmark", targets: ["Threadmark"]),
     ],
     targets: [
-        .target(name: "T3MenuBarCore"),
+        .target(name: "ThreadmarkCore"),
         .executableTarget(
-            name: "T3MenuBar",
-            dependencies: ["T3MenuBarCore"]
+            name: "Threadmark",
+            dependencies: ["ThreadmarkCore"]
         ),
         .testTarget(
-            name: "T3MenuBarCoreTests",
-            dependencies: ["T3MenuBarCore"]
+            name: "ThreadmarkCoreTests",
+            dependencies: ["ThreadmarkCore"]
         ),
     ]
 )

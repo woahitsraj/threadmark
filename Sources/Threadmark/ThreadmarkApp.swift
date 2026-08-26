@@ -10,7 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct T3MenuBarApp: App {
+struct ThreadmarkApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {

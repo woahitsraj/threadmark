@@ -25,5 +25,5 @@ jobs:
         run: ./scripts/build-app.sh
       - name: Verify app bundle
         run: |
-          codesign --verify --deep --strict "dist/T3 Menubar.app"
-          test -s "dist/T3 Menubar.app/Contents/Resources/AppIcon.icns"
+          codesign --verify --deep --strict "dist/Threadmark.app"
+          test -s "dist/Threadmark.app/Contents/Resources/AppIcon.icns"

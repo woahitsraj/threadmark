@@ -1,7 +1,7 @@
 import AppKit
 import ApplicationServices
 import Foundation
-import T3MenuBarCore
+import ThreadmarkCore
 
 @MainActor
 final class T3CodeNavigator {
@@ -191,7 +191,7 @@ enum NavigationError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .accessibilityPermissionRequired:
-            "Allow T3 Menubar in System Settings > Privacy & Security > Accessibility, then click the thread again."
+            "Allow Threadmark in System Settings > Privacy & Security > Accessibility, then click the thread again."
         case .t3CodeNotInstalled:
             "T3 Code is not installed on this Mac."
         case .t3CodeDidNotLaunch:

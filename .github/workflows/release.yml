@@ -42,15 +42,15 @@ jobs:
         run: ./scripts/build-app.sh
       - name: Verify architecture and signature
         run: |
-          binary="dist/T3 Menubar.app/Contents/MacOS/T3MenuBar"
+          binary="dist/Threadmark.app/Contents/MacOS/Threadmark"
           test "$(lipo -archs "$binary")" = "${{ matrix.arch }}"
-          codesign --verify --deep --strict "dist/T3 Menubar.app"
+          codesign --verify --deep --strict "dist/Threadmark.app"
       - name: Package release
         run: |
           version="${RELEASE_TAG#v}"
           mkdir -p release
-          archive="T3-Menubar-${version}-macOS-${{ matrix.arch }}.zip"
-          ditto -c -k --keepParent "dist/T3 Menubar.app" "release/$archive"
+          archive="Threadmark-${version}-macOS-${{ matrix.arch }}.zip"
+          ditto -c -k --keepParent "dist/Threadmark.app" "release/$archive"
           cd release
           shasum -a 256 "$archive" > "$archive.sha256"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

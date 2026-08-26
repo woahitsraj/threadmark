@@ -1,5 +1,5 @@
 import Testing
-@testable import T3MenuBarCore
+@testable import ThreadmarkCore
 
 struct ThreadTitleMatcherTests {
     @Test func matchesThreadTitleInsideElectronRowLabel() {

@@ -1,5 +1,5 @@
 import AppKit
-import T3MenuBarCore
+import ThreadmarkCore
 import UserNotifications
 
 @MainActor

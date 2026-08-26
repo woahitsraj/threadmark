@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import Foundation
 import OSLog
-import T3MenuBarCore
+import ThreadmarkCore
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -30,7 +30,7 @@ final class AppModel: ObservableObject {
     private let notifications = NotificationCoordinator()
     private let launchAtLogin: LaunchAtLoginController
     private let navigator = T3CodeNavigator.shared
-    private let logger = Logger(subsystem: "com.rajan.t3menubar", category: "lifecycle")
+    private let logger = Logger(subsystem: "com.rajan.threadmark", category: "lifecycle")
     private let projection = ActivityProjection()
     private var tracker = ActivityTracker()
     private var projectedActivities: [AgentActivity] = []
@@ -69,7 +69,7 @@ final class AppModel: ObservableObject {
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
-        logger.notice("Starting T3 Menubar")
+        logger.notice("Starting Threadmark")
         notifications.onThreadOpen = { [weak self] target in
             self?.open(target)
         }

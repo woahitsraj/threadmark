@@ -1,5 +1,5 @@
 import Foundation
-import T3MenuBarCore
+import ThreadmarkCore
 
 struct PersistenceStore {
     private enum Key {
@@ -7,6 +7,7 @@ struct PersistenceStore {
         static let notificationsEnabled = "notificationsEnabled"
         static let menuBarCountMode = "menuBarCountMode"
         static let activityTrackingVersion = "activityTrackingVersion"
+        static let legacyMigrationComplete = "legacyT3MenuBarMigrationComplete"
         static let fingerprintPrefix = "fingerprints."
         static let armedPrefix = "armed."
         static let unreviewedPrefix = "unreviewed."
@@ -18,6 +19,10 @@ struct PersistenceStore {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        if !defaults.bool(forKey: Key.legacyMigrationComplete) {
+            Self.migrateLegacyDefaults(into: defaults)
+            defaults.set(true, forKey: Key.legacyMigrationComplete)
+        }
         defaults.register(defaults: [Key.notificationsEnabled: true])
         if defaults.integer(forKey: Key.activityTrackingVersion) < 2 {
             for key in defaults.dictionaryRepresentation().keys where
@@ -27,6 +32,23 @@ struct PersistenceStore {
                 defaults.removeObject(forKey: key)
             }
             defaults.set(2, forKey: Key.activityTrackingVersion)
+        }
+    }
+
+    private static func migrateLegacyDefaults(into defaults: UserDefaults) {
+        guard let legacy = UserDefaults(suiteName: "com.rajan.t3menubar") else { return }
+        let exactKeys = [
+            Key.connection,
+            Key.notificationsEnabled,
+            Key.menuBarCountMode,
+            Key.activityTrackingVersion,
+        ]
+        for (key, value) in legacy.dictionaryRepresentation() where
+            exactKeys.contains(key) ||
+            key.hasPrefix(Key.fingerprintPrefix) ||
+            key.hasPrefix(Key.armedPrefix) ||
+            key.hasPrefix(Key.unreviewedPrefix) {
+            if defaults.object(forKey: key) == nil { defaults.set(value, forKey: key) }
         }
     }
 

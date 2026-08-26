@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import T3MenuBarCore
+@testable import ThreadmarkCore
 
 struct ActivityProjectionTests {
     private let projection = ActivityProjection()

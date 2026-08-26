@@ -1,8 +1,8 @@
-# T3 Menubar for macOS
+# Threadmark for T3 Code
 
-[![CI](https://github.com/woahitsraj/t3-menubar/actions/workflows/ci.yml/badge.svg)](https://github.com/woahitsraj/t3-menubar/actions/workflows/ci.yml)
+[![CI](https://github.com/woahitsraj/threadmark/actions/workflows/ci.yml/badge.svg)](https://github.com/woahitsraj/threadmark/actions/workflows/ci.yml)
 
-A small native menu-bar companion for T3 Code. It watches your paired T3 environment and posts macOS notifications when an agent finishes, fails, or needs attention.
+Threadmark is a small native macOS menu-bar companion for T3 Code. It watches your paired environment and posts notifications when an agent finishes, fails, or needs attention.
 
 ## What it does
 
@@ -23,25 +23,25 @@ Requirements: macOS 14 or newer and Xcode 26 or newer.
 
 ```sh
 ./scripts/build-app.sh
-open "dist/T3 Menubar.app"
+open "dist/Threadmark.app"
 ```
 
-Move `T3 Menubar.app` to `/Applications` before enabling Launch at Login.
+Move `Threadmark.app` to `/Applications` before enabling Launch at Login.
 
-Opening an exact desktop thread currently uses macOS Accessibility because T3 Code does not yet handle external thread deep links. Allow T3 Menubar in System Settings > Privacy & Security > Accessibility when prompted.
+Opening an exact desktop thread currently uses macOS Accessibility because T3 Code does not yet handle external thread deep links. Allow Threadmark in System Settings > Privacy & Security > Accessibility when prompted.
 
 ## Pair
 
 1. In T3 Code, open Settings, then Connections.
 2. Create or copy a pairing link for the environment you want to monitor.
-3. Open the T3 Menubar menu-bar item and paste the link.
+3. Open the Threadmark menu-bar item and paste the link.
 4. Allow notifications when macOS asks.
 
-The first thread click also asks for Accessibility access. T3 Code does not yet accept external thread routes, so T3 Menubar uses Accessibility to select the matching sidebar row in the native app. Grant access, then click the thread again.
+The first thread click also asks for Accessibility access. T3 Code does not yet accept external thread routes, so Threadmark uses Accessibility to select the matching sidebar row in the native app. Grant access, then click the thread again.
 
 ## Done and review state
 
-Done is a separate state managed by T3 Menubar. A thread becomes Done only when the app first observes it Working and later observes that work stop. Threads that were already idle when discovered do not qualify. Opening a Done thread from T3 Menubar marks that work reviewed and removes it from the Done count. A later Working-to-stopped transition on the same thread becomes Done again.
+Done is a separate state managed by Threadmark. A thread becomes Done only when the app first observes it Working and later observes that work stop. Threads that were already idle when discovered do not qualify. Opening a Done thread from Threadmark marks that work reviewed and removes it from the Done count. A later Working-to-stopped transition on the same thread becomes Done again.
 
 Pairing links contain a one-time token. The app exchanges it immediately and never persists the link itself.
 
@@ -49,7 +49,7 @@ Pairing links contain a one-time token. The app exchanges it immediately and nev
 
 ```sh
 swift test
-swift run T3MenuBar
+swift run Threadmark
 ```
 
 The transport sits behind `ActivitySource`, so a future T3 Connect aggregate-stream adapter can replace polling without changing the UI or notification logic.
