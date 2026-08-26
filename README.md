@@ -1,5 +1,7 @@
 # T3 Menubar for macOS
 
+[![CI](https://github.com/woahitsraj/t3-menubar/actions/workflows/ci.yml/badge.svg)](https://github.com/woahitsraj/t3-menubar/actions/workflows/ci.yml)
+
 A small native menu-bar companion for T3 Code. It watches your paired T3 environment and posts macOS notifications when an agent finishes, fails, or needs attention.
 
 ## What it does
