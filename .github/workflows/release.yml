@@ -1,9 +1,18 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to release, such as v0.1.0
+        required: true
+        type: string
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v*"
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 permissions:
   contents: read
@@ -21,9 +30,12 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Validate version
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${RELEASE_TAG#v}"
           plist_version="$(plutil -extract CFBundleShortVersionString raw Resources/Info.plist)"
           test "$version" = "$plist_version"
       - name: Build app bundle
@@ -35,7 +47,7 @@ jobs:
           codesign --verify --deep --strict "dist/T3 Menubar.app"
       - name: Package release
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           mkdir -p release
           archive="T3-Menubar-${version}-macOS-${{ matrix.arch }}.zip"
           ditto -c -k --keepParent "dist/T3 Menubar.app" "release/$archive"
@@ -66,7 +78,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$RELEASE_TAG" \
             release/*.zip \
             release/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
