@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -26,4 +27,3 @@ jobs:
         run: |
           codesign --verify --deep --strict "dist/T3 Menubar.app"
           test -s "dist/T3 Menubar.app/Contents/Resources/AppIcon.icns"
-
