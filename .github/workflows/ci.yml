@@ -21,9 +21,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Test
         run: swift test
-      - name: Build app bundle
-        run: ./scripts/build-app.sh
-      - name: Verify app bundle
+      - name: Build disk image
+        run: ./scripts/build-dmg.sh
+      - name: Verify disk image
         run: |
-          codesign --verify --deep --strict "dist/Threadmark.app"
-          test -s "dist/Threadmark.app/Contents/Resources/AppIcon.icns"
+          dmg="$(find dist -name '*.dmg' -print -quit)"
+          mount_point="$(mktemp -d)"
+          hdiutil attach "$dmg" -mountpoint "$mount_point" -nobrowse -readonly
+          trap 'hdiutil detach "$mount_point"' EXIT
+          codesign --verify --deep --strict "$mount_point/Threadmark.app"
+          test -s "$mount_point/Threadmark.app/Contents/Resources/AppIcon.icns"
+          test "$(readlink "$mount_point/Applications")" = "/Applications"

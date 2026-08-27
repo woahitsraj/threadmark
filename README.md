@@ -28,6 +28,14 @@ open "dist/Threadmark.app"
 
 Move `Threadmark.app` to `/Applications` before enabling Launch at Login.
 
+To build an installable disk image, run:
+
+```sh
+./scripts/build-dmg.sh
+```
+
+Open the resulting file in `dist`, then drag Threadmark onto the Applications shortcut.
+
 Opening an exact desktop thread currently uses macOS Accessibility because T3 Code does not yet handle external thread deep links. Allow Threadmark in System Settings > Privacy & Security > Accessibility when prompted.
 
 ## Pair
@@ -56,15 +64,14 @@ The transport sits behind `ActivitySource`, so a future T3 Connect aggregate-str
 
 ## Releases
 
-GitHub Actions runs the test suite and validates the app bundle on every push and pull request. Version tags build separate Apple Silicon and Intel archives, create a SHA-256 manifest, and publish a GitHub release with generated notes.
+GitHub Actions runs the test suite and validates the disk image on every push and pull request. A new version tag builds separate Apple Silicon and Intel DMGs, creates a SHA-256 manifest, and publishes a GitHub release with generated notes.
 
 To publish a release:
 
 1. Set `CFBundleShortVersionString` in `Resources/Info.plist` to the release version.
-2. Commit the version change.
-3. Create and push the matching tag, such as `v0.1.0`.
-
-If GitHub delays the tag event, open the Release workflow in Actions, choose Run workflow, and enter the existing tag.
+2. Increment `CFBundleVersion`.
+3. Commit the version change.
+4. Create and push the matching tag, such as `v0.2.2`.
 
 Release builds are ad hoc signed but not notarized. Public distribution without macOS security warnings requires an Apple Developer ID certificate and notarization credentials.
 
