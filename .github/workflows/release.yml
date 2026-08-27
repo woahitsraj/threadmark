@@ -1,18 +1,12 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing version tag to release, such as v0.1.0
-        required: true
-        type: string
   push:
     tags:
       - "v*"
 
 env:
-  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  RELEASE_TAG: ${{ github.ref_name }}
 
 permissions:
   contents: read
@@ -38,8 +32,8 @@ jobs:
           version="${RELEASE_TAG#v}"
           plist_version="$(plutil -extract CFBundleShortVersionString raw Resources/Info.plist)"
           test "$version" = "$plist_version"
-      - name: Build app bundle
-        run: ./scripts/build-app.sh
+      - name: Build disk image
+        run: ./scripts/build-dmg.sh
       - name: Verify architecture and signature
         run: |
           binary="dist/Threadmark.app/Contents/MacOS/Threadmark"
@@ -47,12 +41,14 @@ jobs:
           codesign --verify --deep --strict "dist/Threadmark.app"
       - name: Package release
         run: |
-          version="${RELEASE_TAG#v}"
+          version="$(plutil -extract CFBundleShortVersionString raw Resources/Info.plist)"
           mkdir -p release
-          archive="Threadmark-${version}-macOS-${{ matrix.arch }}.zip"
-          ditto -c -k --keepParent "dist/Threadmark.app" "release/$archive"
+          archive="dist/Threadmark-$version-macOS-${{ matrix.arch }}.dmg"
+          archive_name="${archive##*/}"
+          test -f "$archive"
+          cp "$archive" release/
           cd release
-          shasum -a 256 "$archive" > "$archive.sha256"
+          shasum -a 256 "$archive_name" > "$archive_name.sha256"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ matrix.arch }}
@@ -79,7 +75,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$RELEASE_TAG" \
-            release/*.zip \
+            release/*.dmg \
             release/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
