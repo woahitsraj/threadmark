@@ -21,12 +21,18 @@
     <key>CFBundleShortVersionString</key>
     <string>0.2.2</string>
     <key>CFBundleVersion</key>
-    <string>4</string>
+    <string>5</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string>Open source software</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUFeedURL</key>
+    <string>https://github.com/woahitsraj/threadmark/releases/latest/download/appcast.xml</string>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
 </dict>
 </plist>

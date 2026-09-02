@@ -142,6 +142,18 @@ struct ActivityProjectionTests {
         #expect(activity.fingerprint.contains(":completed:"))
     }
 
+    @Test func includesLatestMessageForNotification() throws {
+        let snapshot = try decodeSnapshot(sessionStatus: "ready", turnState: "completed")
+        let activity = try #require(projection.project(
+            snapshot: snapshot,
+            environmentId: "env-1",
+            latestMessagesByThreadId: ["thread-1": "Finished the notification update."],
+            now: Date(timeIntervalSince1970: 1_800_000_000)
+        ).first)
+
+        #expect(activity.latestMessage == "Finished the notification update.")
+    }
+
     @Test func recentlyCompletedUnsettledThreadRemainsVisible() throws {
         let snapshot = try decodeSnapshot(sessionStatus: "ready", turnState: "completed")
 

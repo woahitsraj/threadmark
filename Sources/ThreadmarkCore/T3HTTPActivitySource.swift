@@ -4,6 +4,28 @@ import OSLog
 public protocol ActivitySource: Sendable {
     func pair(using pairingURL: String) async throws -> PairedEnvironment
     func snapshot(configuration: ConnectionConfiguration, accessToken: String) async throws -> ActivitySnapshot
+    func startTurn(
+        threadId: String,
+        text: String,
+        runtimeMode: ThreadRuntimeMode,
+        interactionMode: ThreadInteractionMode,
+        configuration: ConnectionConfiguration,
+        accessToken: String
+    ) async throws
+    func respondToApproval(
+        threadId: String,
+        requestId: String,
+        decision: ApprovalDecision,
+        configuration: ConnectionConfiguration,
+        accessToken: String
+    ) async throws
+    func respondToUserInput(
+        threadId: String,
+        requestId: String,
+        answers: [String: UserInputAnswer],
+        configuration: ConnectionConfiguration,
+        accessToken: String
+    ) async throws
 }
 
 public actor T3HTTPActivitySource: ActivitySource {
@@ -15,6 +37,21 @@ public actor T3HTTPActivitySource: ActivitySource {
     private struct CachedVCSStatus: Sendable {
         let status: VCSStatus
         let fetchedAt: Date
+    }
+
+    private struct CachedLatestMessage: Sendable {
+        let fingerprint: String
+        let text: String
+    }
+
+    private struct FetchedThreadDetails: Sendable {
+        let interactions: PendingThreadInteractions
+        let latestMessage: String?
+    }
+
+    private struct ProjectedThreadDetails: Sendable {
+        let interactionsByThreadId: [String: PendingThreadInteractions]
+        let latestMessagesByThreadId: [String: String]
     }
 
     private struct VCSStatus: Decodable, Sendable {
@@ -30,6 +67,10 @@ public actor T3HTTPActivitySource: ActivitySource {
         let projectId: String
         let repository: String
         let number: Int
+    }
+
+    private struct DispatchResult: Decodable {
+        let sequence: Int
     }
 
     private struct RPCRequest: Encodable {
@@ -57,6 +98,7 @@ public actor T3HTTPActivitySource: ActivitySource {
     private let logger = Logger(subsystem: "com.rajan.threadmark", category: "network")
     private var changeRequestCache: [LinkedPullRequest: CachedChangeRequest] = [:]
     private var vcsStatusCache: [String: CachedVCSStatus] = [:]
+    private var latestMessageCache: [String: CachedLatestMessage] = [:]
     private let changeRequestCacheLifetime: TimeInterval = 15
 
     public init(session: URLSession = .shared) {
@@ -71,10 +113,15 @@ public actor T3HTTPActivitySource: ActivitySource {
         )
         let token = try await exchangeToken(at: target.httpBaseURL, credential: target.credential)
         guard token.tokenType == "Bearer" else { throw T3HTTPError.unsupportedTokenType(token.tokenType) }
+        let scopes = token.scope.split(separator: " ").map(String.init)
+        guard scopes.contains("orchestration:operate") else {
+            throw T3HTTPError.missingScope("orchestration:operate")
+        }
         let configuration = ConnectionConfiguration(
             baseURL: target.httpBaseURL,
             environmentId: descriptor.environmentId,
-            label: descriptor.label
+            label: descriptor.label,
+            grantedScopes: scopes
         )
         let initial = try await snapshot(configuration: configuration, accessToken: token.accessToken)
         return PairedEnvironment(
@@ -97,7 +144,159 @@ public actor T3HTTPActivitySource: ActivitySource {
             configuration: configuration,
             accessToken: accessToken
         )
-        return ActivitySnapshot(environment: environment, changeRequestsByThreadId: statuses)
+        let details = await threadDetails(
+            for: environment,
+            configuration: configuration,
+            accessToken: accessToken
+        )
+        return ActivitySnapshot(
+            environment: environment,
+            changeRequestsByThreadId: statuses,
+            interactionsByThreadId: details.interactionsByThreadId,
+            latestMessagesByThreadId: details.latestMessagesByThreadId
+        )
+    }
+
+    public func startTurn(
+        threadId: String,
+        text: String,
+        runtimeMode: ThreadRuntimeMode,
+        interactionMode: ThreadInteractionMode,
+        configuration: ConnectionConfiguration,
+        accessToken: String
+    ) async throws {
+        try await dispatch([
+            "type": "thread.turn.start",
+            "commandId": UUID().uuidString.lowercased(),
+            "threadId": threadId,
+            "message": [
+                "messageId": UUID().uuidString.lowercased(),
+                "role": "user",
+                "text": text,
+                "attachments": [],
+            ],
+            "runtimeMode": runtimeMode.rawValue,
+            "interactionMode": interactionMode.rawValue,
+            "createdAt": timestamp(),
+        ], configuration: configuration, accessToken: accessToken)
+    }
+
+    public func respondToApproval(
+        threadId: String,
+        requestId: String,
+        decision: ApprovalDecision,
+        configuration: ConnectionConfiguration,
+        accessToken: String
+    ) async throws {
+        try await dispatch([
+            "type": "thread.approval.respond",
+            "commandId": UUID().uuidString.lowercased(),
+            "threadId": threadId,
+            "requestId": requestId,
+            "decision": decision.rawValue,
+            "createdAt": timestamp(),
+        ], configuration: configuration, accessToken: accessToken)
+    }
+
+    public func respondToUserInput(
+        threadId: String,
+        requestId: String,
+        answers: [String: UserInputAnswer],
+        configuration: ConnectionConfiguration,
+        accessToken: String
+    ) async throws {
+        let payload = answers.mapValues { answer -> Any in
+            switch answer {
+            case let .text(value): value
+            case let .choices(values): values
+            }
+        }
+        try await dispatch([
+            "type": "thread.user-input.respond",
+            "commandId": UUID().uuidString.lowercased(),
+            "threadId": threadId,
+            "requestId": requestId,
+            "answers": payload,
+            "createdAt": timestamp(),
+        ], configuration: configuration, accessToken: accessToken)
+    }
+
+    private func threadDetails(
+        for snapshot: EnvironmentSnapshot,
+        configuration: ConnectionConfiguration,
+        accessToken: String
+    ) async -> ProjectedThreadDetails {
+        let activeThreadIds = Set(snapshot.threads.map(\.id))
+        latestMessageCache = latestMessageCache.filter { activeThreadIds.contains($0.key) }
+        let targets = snapshot.threads.compactMap { thread -> (ThreadShell, String)? in
+            guard needsThreadDetails(thread) else { return nil }
+            let fingerprint = messageFingerprint(for: thread)
+            let hasPendingInteraction = thread.hasPendingApprovals || thread.hasPendingUserInput
+            if !hasPendingInteraction,
+               latestMessageCache[thread.id]?.fingerprint == fingerprint {
+                return nil
+            }
+            return (thread, fingerprint)
+        }
+        var interactionsByThreadId: [String: PendingThreadInteractions] = [:]
+        await withTaskGroup(of: (String, String, FetchedThreadDetails?).self) { group in
+            for (thread, fingerprint) in targets {
+                group.addTask {
+                    do {
+                        let detail: ThreadDetailSnapshot = try await self.get(
+                            url: self.threadEndpoint(thread.id, at: configuration.baseURL),
+                            bearerToken: accessToken
+                        )
+                        let interactions = ThreadInteractionProjection().project(detail.thread.activities)
+                        let message = detail.thread.latestAssistantMessage(
+                            matching: thread.latestTurn?.assistantMessageId
+                        )
+                        return (
+                            thread.id,
+                            fingerprint,
+                            FetchedThreadDetails(
+                                interactions: interactions,
+                                latestMessage: message
+                            )
+                        )
+                    } catch {
+                        return (thread.id, fingerprint, nil)
+                    }
+                }
+            }
+            for await (threadId, fingerprint, details) in group {
+                guard let details else { continue }
+                interactionsByThreadId[threadId] = details.interactions
+                if let message = details.latestMessage {
+                    latestMessageCache[threadId] = CachedLatestMessage(
+                        fingerprint: fingerprint,
+                        text: message
+                    )
+                }
+            }
+        }
+        return ProjectedThreadDetails(
+            interactionsByThreadId: interactionsByThreadId,
+            latestMessagesByThreadId: latestMessageCache.mapValues(\.text)
+        )
+    }
+
+    private func needsThreadDetails(_ thread: ThreadShell) -> Bool {
+        if thread.hasPendingApprovals || thread.hasPendingUserInput { return true }
+        if thread.session?.status == .error { return true }
+        guard let state = thread.latestTurn?.state else { return false }
+        return [.completed, .error, .interrupted].contains(state)
+    }
+
+    private func messageFingerprint(for thread: ThreadShell) -> String {
+        [
+            thread.latestTurn?.turnId,
+            thread.latestTurn?.state.rawValue,
+            thread.latestTurn?.assistantMessageId,
+            thread.latestTurn?.completedAt,
+            thread.session?.status.rawValue,
+            thread.session?.updatedAt,
+        ].map { $0 ?? "" }.joined(separator: "|")
     }
 
     private func changeRequestStatuses(
@@ -345,12 +544,31 @@ public actor T3HTTPActivitySource: ActivitySource {
             ("subject_token", credential),
             ("subject_token_type", "urn:t3:params:oauth:token-type:environment-bootstrap"),
             ("requested_token_type", "urn:ietf:params:oauth:token-type:access_token"),
-            ("scope", "orchestration:read"),
+            ("scope", "orchestration:read orchestration:operate"),
             ("client_label", "Threadmark"),
             ("client_device_type", "desktop"),
             ("client_os", "macOS"),
         ])
         return try await perform(request)
+    }
+
+    private func dispatch(
+        _ command: [String: Any],
+        configuration: ConnectionConfiguration,
+        accessToken: String
+    ) async throws {
+        var request = URLRequest(url: endpoint("/api/orchestration/dispatch", at: configuration.baseURL))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 10
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: command)
+        } catch {
+            throw T3HTTPError.invalidPayload("Could not encode the T3 command.")
+        }
+        let _: DispatchResult = try await perform(request)
     }
 
     private func get<Response: Decodable>(url: URL, bearerToken: String?) async throws -> Response {
@@ -390,6 +608,20 @@ public actor T3HTTPActivitySource: ActivitySource {
         return components.url!
     }
 
+    private func threadEndpoint(_ threadId: String, at baseURL: URL) -> URL {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        let encoded = threadId.addingPercentEncoding(withAllowedCharacters: allowed) ?? threadId
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
+        components.percentEncodedPath = "/api/orchestration/threads/\(encoded)"
+        components.query = nil
+        components.fragment = nil
+        return components.url!
+    }
+
+    private func timestamp() -> String {
+        Date().formatted(Date.ISO8601FormatStyle(includingFractionalSeconds: true))
+    }
+
     private func formBody(_ items: [(String, String)]) -> Data {
         var components = URLComponents()
         components.queryItems = items.map { URLQueryItem(name: $0.0, value: $0.1) }
@@ -408,6 +640,7 @@ public enum T3HTTPError: LocalizedError, Equatable {
     case server(status: Int, message: String?)
     case transport(String)
     case unsupportedTokenType(String)
+    case missingScope(String)
 
     public var errorDescription: String? {
         switch self {
@@ -421,6 +654,8 @@ public enum T3HTTPError: LocalizedError, Equatable {
             "Could not reach T3: \(message)"
         case let .unsupportedTokenType(type):
             "This connection requires unsupported \(type) authentication."
+        case let .missingScope(scope):
+            "This pairing link does not grant \(scope). Create a new interactive pairing link in T3 Code."
         }
     }
 }
