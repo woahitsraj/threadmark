@@ -35,7 +35,16 @@ sips -z 512 512 "$project_root/Resources/AppIcon.png" --out "$iconset_path/icon_
 cp "$project_root/Resources/AppIcon.png" "$iconset_path/icon_512x512@2x.png"
 iconutil -c icns "$iconset_path" -o "$app_path/Contents/Resources/AppIcon.icns"
 if [[ -n "${CODE_SIGN_IDENTITY:-}" ]]; then
-  codesign --force --sign "$CODE_SIGN_IDENTITY" --options runtime --timestamp "$app_path"
+  embedded_sparkle="$app_path/Contents/Frameworks/Sparkle.framework"
+  sparkle_version="$embedded_sparkle/Versions/B"
+  sign_args=(--force --sign "$CODE_SIGN_IDENTITY" --options runtime --timestamp)
+  codesign "${sign_args[@]}" "$sparkle_version/XPCServices/Installer.xpc"
+  codesign "${sign_args[@]}" --preserve-metadata=entitlements \
+    "$sparkle_version/XPCServices/Downloader.xpc"
+  codesign "${sign_args[@]}" "$sparkle_version/Autoupdate"
+  codesign "${sign_args[@]}" "$sparkle_version/Updater.app"
+  codesign "${sign_args[@]}" "$embedded_sparkle"
+  codesign "${sign_args[@]}" "$app_path"
 else
   codesign \
     --force \
