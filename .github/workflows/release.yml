@@ -120,17 +120,23 @@ jobs:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           swift package resolve
-          mkdir updates
-          cp release/*.dmg updates/
-          printf '%s' "$SPARKLE_PRIVATE_KEY" \
-            | .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
-                --ed-key-file - \
-                --download-url-prefix "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/" \
-                --full-release-notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG" \
-                -o appcast.xml \
-                updates
+          for arch in arm64 x86_64; do
+            mkdir -p "updates/$arch"
+            cp release/*-"$arch".dmg "updates/$arch/"
+            printf '%s' "$SPARKLE_PRIVATE_KEY" \
+              | .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
+                  --ed-key-file - \
+                  --download-url-prefix "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/" \
+                  --full-release-notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG" \
+                  -o "appcast-$arch.xml" \
+                  "updates/$arch"
+          done
+          swift scripts/merge-appcasts.swift \
+            appcast-arm64.xml appcast-x86_64.xml appcast.xml
           test -s appcast.xml
-          grep -q 'sparkle:edSignature=' appcast.xml
+          test "$(grep -c 'sparkle:edSignature=' appcast.xml)" = 2
+          grep -q '<sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>' \
+            appcast.xml
           mkdir appcast
           cp appcast.xml appcast/
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
