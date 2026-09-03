@@ -49,6 +49,11 @@ public struct PairingTarget: Equatable, Sendable {
         }
         if components.scheme == "ws" { components.scheme = "http" }
         if components.scheme == "wss" { components.scheme = "https" }
+        if components.scheme == "http",
+           let host = components.host,
+           !isAllowedInsecureHost(host) {
+            throw PairingError.invalidHost
+        }
         components.path = "/"
         components.query = nil
         components.fragment = nil
@@ -58,6 +63,29 @@ public struct PairingTarget: Equatable, Sendable {
 
     private static func isSupported(_ scheme: String?) -> Bool {
         ["http", "https", "ws", "wss"].contains(scheme?.lowercased())
+    }
+
+    private static func isAllowedInsecureHost(_ host: String) -> Bool {
+        let host = host.lowercased()
+        let addressHost = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if host == "localhost"
+            || (!host.contains(".") && !host.contains(":"))
+            || host.hasSuffix(".local")
+            || host.hasSuffix(".ts.net") {
+            return true
+        }
+        if addressHost.contains(":"),
+           addressHost == "::1"
+            || ["fc", "fd", "fe8", "fe9", "fea", "feb"].contains(where: addressHost.hasPrefix) {
+            return true
+        }
+        let octets = addressHost.split(separator: ".").compactMap { Int($0) }
+        guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else { return false }
+        return octets[0] == 10
+            || octets[0] == 127
+            || (octets[0] == 172 && (16...31).contains(octets[1]))
+            || (octets[0] == 192 && octets[1] == 168)
+            || (octets[0] == 100 && (64...127).contains(octets[1]))
     }
 }
 

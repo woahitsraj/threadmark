@@ -3,6 +3,7 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = AppModel()
+    let updater = AppUpdater()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         model.start()
@@ -15,7 +16,7 @@ struct ThreadmarkApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuPanel(model: delegate.model)
+            MenuPanel(model: delegate.model, updater: delegate.updater)
         } label: {
             MenuBarStatusLabel(model: delegate.model)
         }

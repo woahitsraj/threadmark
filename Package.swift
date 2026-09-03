@@ -9,11 +9,23 @@ let package = Package(
         .library(name: "ThreadmarkCore", targets: ["ThreadmarkCore"]),
         .executable(name: "Threadmark", targets: ["Threadmark"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.6"),
+    ],
     targets: [
         .target(name: "ThreadmarkCore"),
         .executableTarget(
             name: "Threadmark",
-            dependencies: ["ThreadmarkCore"]
+            dependencies: [
+                "ThreadmarkCore",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
+            linkerSettings: [
+                .unsafeFlags([
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "@executable_path/../Frameworks",
+                ]),
+            ]
         ),
         .testTarget(
             name: "ThreadmarkCoreTests",

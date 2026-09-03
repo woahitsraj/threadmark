@@ -66,12 +66,36 @@ final class AppModel: ObservableObject {
         menuBarCountMode.count(in: activities)
     }
 
+    var canInteract: Bool {
+        connection?.canOperate == true
+    }
+
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
         logger.notice("Starting Threadmark")
         notifications.onThreadOpen = { [weak self] target in
             self?.open(target)
+        }
+        notifications.onReply = { [weak self] target, text in
+            Task { _ = await self?.reply(to: target, text: text) }
+        }
+        notifications.onApproval = { [weak self] target, requestId, decision in
+            Task { await self?.respondToApproval(
+                in: target,
+                requestId: requestId,
+                decision: decision
+            ) }
+        }
+        notifications.onUserInput = { [weak self] target, requestId, questionId, answer in
+            Task { await self?.respondToUserInput(
+                in: target,
+                requestId: requestId,
+                answers: [questionId: answer]
+            ) }
+        }
+        notifications.onMarkRead = { [weak self] target in
+            self?.markRead(target)
         }
         guard let saved = persistence.connection else {
             logger.notice("No saved T3 connection")
@@ -218,6 +242,85 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func reply(to activity: AgentActivity, text: String) async -> Bool {
+        guard let connection, let accessToken else { return false }
+        let reply = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reply.isEmpty else { return false }
+        do {
+            errorMessage = nil
+            try await source.startTurn(
+                threadId: activity.id,
+                text: reply,
+                runtimeMode: activity.runtimeMode,
+                interactionMode: activity.interactionMode,
+                configuration: connection,
+                accessToken: accessToken
+            )
+            if activity.needsReview { markReviewed(activity) }
+            await pollOnce()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func respondToApproval(
+        in activity: AgentActivity,
+        requestId: String,
+        decision: ApprovalDecision
+    ) async {
+        guard let connection, let accessToken else { return }
+        do {
+            errorMessage = nil
+            try await source.respondToApproval(
+                threadId: activity.id,
+                requestId: requestId,
+                decision: decision,
+                configuration: connection,
+                accessToken: accessToken
+            )
+            await pollOnce()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func respondToUserInput(
+        in activity: AgentActivity,
+        requestId: String,
+        answers: [String: UserInputAnswer]
+    ) async {
+        guard let connection, let accessToken else { return }
+        do {
+            errorMessage = nil
+            try await source.respondToUserInput(
+                threadId: activity.id,
+                requestId: requestId,
+                answers: answers,
+                configuration: connection,
+                accessToken: accessToken
+            )
+            await pollOnce()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func markAllAsRead() {
+        for activity in activities where activity.needsReview {
+            reviewTracker.markReviewed(activity.fingerprint)
+        }
+        if let connection {
+            persistence.save(
+                unreviewedFingerprints: reviewTracker.unreviewedFingerprints,
+                for: connection.environmentId
+            )
+        }
+        applyReviewFilter()
+        notifications.removeAllDelivered()
+    }
+
     private func open(_ target: NotificationThreadTarget) {
         if let activity = projectedActivities.first(where: {
             $0.id == target.threadId && $0.fingerprint == target.fingerprint
@@ -242,6 +345,40 @@ final class AppModel: ObservableObject {
                 self?.errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func activity(for target: NotificationThreadTarget) -> AgentActivity? {
+        projectedActivities.first { $0.id == target.threadId }
+    }
+
+    private func reply(to target: NotificationThreadTarget, text: String) async -> Bool {
+        guard let activity = activity(for: target) else { return false }
+        return await reply(to: activity, text: text)
+    }
+
+    private func respondToApproval(
+        in target: NotificationThreadTarget,
+        requestId: String,
+        decision: ApprovalDecision
+    ) async {
+        guard let activity = activity(for: target) else { return }
+        await respondToApproval(in: activity, requestId: requestId, decision: decision)
+    }
+
+    private func respondToUserInput(
+        in target: NotificationThreadTarget,
+        requestId: String,
+        answers: [String: UserInputAnswer]
+    ) async {
+        guard let activity = activity(for: target) else { return }
+        await respondToUserInput(in: activity, requestId: requestId, answers: answers)
+    }
+
+    private func markRead(_ target: NotificationThreadTarget) {
+        guard let activity = activities.first(where: {
+            $0.id == target.threadId && $0.fingerprint == target.fingerprint
+        }), activity.needsReview else { return }
+        markReviewed(activity)
     }
 
     func quit() {
@@ -278,7 +415,9 @@ final class AppModel: ObservableObject {
         let projected = projection.project(
             snapshot: snapshot.environment,
             environmentId: connection.environmentId,
-            changeRequestsByThreadId: snapshot.changeRequestsByThreadId
+            changeRequestsByThreadId: snapshot.changeRequestsByThreadId,
+            interactionsByThreadId: snapshot.interactionsByThreadId,
+            latestMessagesByThreadId: snapshot.latestMessagesByThreadId
         )
         let transitions = tracker.observe(projected)
         projectedActivities = projected
@@ -292,7 +431,10 @@ final class AppModel: ObservableObject {
         persistence.save(armedThreadIds: tracker.armedThreadIds, for: connection.environmentId)
         if notificationsEnabled {
             for transition in transitions {
-                Task { await notifications.deliver(transition) }
+                Task { await notifications.deliver(
+                    transition,
+                    interactive: connection.canOperate
+                ) }
             }
         }
     }

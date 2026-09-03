@@ -41,6 +41,8 @@ public struct ThreadShell: Decodable, Sendable {
     public let branch: String?
     public let worktreePath: String?
     public let modelSelection: ModelSelection
+    public let runtimeMode: ThreadRuntimeMode
+    public let interactionMode: ThreadInteractionMode
     public let latestTurn: LatestTurn?
     public let session: AgentSession?
     public let archivedAt: String?
@@ -62,6 +64,8 @@ public struct ThreadShell: Decodable, Sendable {
         branch: String? = nil,
         worktreePath: String? = nil,
         modelSelection: ModelSelection,
+        runtimeMode: ThreadRuntimeMode = .fullAccess,
+        interactionMode: ThreadInteractionMode = .default,
         latestTurn: LatestTurn?,
         session: AgentSession?,
         archivedAt: String? = nil,
@@ -82,6 +86,8 @@ public struct ThreadShell: Decodable, Sendable {
         self.branch = branch
         self.worktreePath = worktreePath
         self.modelSelection = modelSelection
+        self.runtimeMode = runtimeMode
+        self.interactionMode = interactionMode
         self.latestTurn = latestTurn
         self.session = session
         self.archivedAt = archivedAt
@@ -98,7 +104,7 @@ public struct ThreadShell: Decodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case id, projectId, title, createdAt, branch, worktreePath
-        case modelSelection, latestTurn, session, archivedAt
+        case modelSelection, runtimeMode, interactionMode, latestTurn, session, archivedAt
         case latestUserMessageAt, updatedAt
         case settledOverride, settledAt
         case hasPendingApprovals, hasPendingUserInput, backgroundLiveness, planProgress
@@ -115,6 +121,8 @@ public struct ThreadShell: Decodable, Sendable {
         branch = try values.decodeIfPresent(String.self, forKey: .branch)
         worktreePath = try values.decodeIfPresent(String.self, forKey: .worktreePath)
         modelSelection = try values.decode(ModelSelection.self, forKey: .modelSelection)
+        runtimeMode = try values.decodeIfPresent(ThreadRuntimeMode.self, forKey: .runtimeMode) ?? .fullAccess
+        interactionMode = try values.decodeIfPresent(ThreadInteractionMode.self, forKey: .interactionMode) ?? .default
         latestTurn = try values.decodeIfPresent(LatestTurn.self, forKey: .latestTurn)
         session = try values.decodeIfPresent(AgentSession.self, forKey: .session)
         archivedAt = try values.decodeIfPresent(String.self, forKey: .archivedAt)
@@ -163,13 +171,19 @@ public struct ChangeRequestStatus: Decodable, Equatable, Sendable {
 public struct ActivitySnapshot: Sendable {
     public let environment: EnvironmentSnapshot
     public let changeRequestsByThreadId: [String: ChangeRequestStatus]
+    public let interactionsByThreadId: [String: PendingThreadInteractions]
+    public let latestMessagesByThreadId: [String: String]
 
     public init(
         environment: EnvironmentSnapshot,
-        changeRequestsByThreadId: [String: ChangeRequestStatus] = [:]
+        changeRequestsByThreadId: [String: ChangeRequestStatus] = [:],
+        interactionsByThreadId: [String: PendingThreadInteractions] = [:],
+        latestMessagesByThreadId: [String: String] = [:]
     ) {
         self.environment = environment
         self.changeRequestsByThreadId = changeRequestsByThreadId
+        self.interactionsByThreadId = interactionsByThreadId
+        self.latestMessagesByThreadId = latestMessagesByThreadId
     }
 }
 
@@ -186,9 +200,22 @@ public struct ModelSelection: Decodable, Sendable {
     }
 }
 
+public enum ThreadRuntimeMode: String, Codable, Sendable {
+    case approvalRequired = "approval-required"
+    case autoAcceptEdits = "auto-accept-edits"
+    case auto
+    case fullAccess = "full-access"
+}
+
+public enum ThreadInteractionMode: String, Codable, Sendable {
+    case `default`
+    case plan
+}
+
 public struct LatestTurn: Decodable, Sendable {
     public let turnId: String
     public let state: TurnState
+    public let assistantMessageId: String?
     public let requestedAt: String?
     public let startedAt: String?
     public let completedAt: String?
@@ -196,12 +223,14 @@ public struct LatestTurn: Decodable, Sendable {
     public init(
         turnId: String,
         state: TurnState,
+        assistantMessageId: String? = nil,
         requestedAt: String? = nil,
         startedAt: String? = nil,
         completedAt: String? = nil
     ) {
         self.turnId = turnId
         self.state = state
+        self.assistantMessageId = assistantMessageId
         self.requestedAt = requestedAt
         self.startedAt = startedAt
         self.completedAt = completedAt
@@ -259,11 +288,35 @@ public struct ConnectionConfiguration: Codable, Equatable, Sendable {
     public let baseURL: URL
     public let environmentId: String
     public let label: String
+    public let grantedScopes: [String]
 
-    public init(baseURL: URL, environmentId: String, label: String) {
+    public init(
+        baseURL: URL,
+        environmentId: String,
+        label: String,
+        grantedScopes: [String] = ["orchestration:read"]
+    ) {
         self.baseURL = baseURL
         self.environmentId = environmentId
         self.label = label
+        self.grantedScopes = grantedScopes
+    }
+
+    public var canOperate: Bool {
+        grantedScopes.contains("orchestration:operate")
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case baseURL, environmentId, label, grantedScopes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        baseURL = try values.decode(URL.self, forKey: .baseURL)
+        environmentId = try values.decode(String.self, forKey: .environmentId)
+        label = try values.decode(String.self, forKey: .label)
+        grantedScopes = try values.decodeIfPresent([String].self, forKey: .grantedScopes)
+            ?? ["orchestration:read"]
     }
 }
 

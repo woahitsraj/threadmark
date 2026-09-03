@@ -18,11 +18,15 @@ public struct AgentActivity: Identifiable, Equatable, Sendable {
     public let modelTitle: String
     public let phase: ActivityPhase
     public let detail: String?
+    public let latestMessage: String?
     public let planProgress: PlanProgressSummary?
     public let updatedAt: Date
     public let deepLink: URL?
     public let fingerprint: String
     public let needsReview: Bool
+    public let runtimeMode: ThreadRuntimeMode
+    public let interactionMode: ThreadInteractionMode
+    public let interactions: PendingThreadInteractions
 
     public init(
         id: String,
@@ -32,11 +36,15 @@ public struct AgentActivity: Identifiable, Equatable, Sendable {
         modelTitle: String,
         phase: ActivityPhase,
         detail: String?,
+        latestMessage: String? = nil,
         planProgress: PlanProgressSummary?,
         updatedAt: Date,
         deepLink: URL?,
         fingerprint: String,
-        needsReview: Bool = false
+        needsReview: Bool = false,
+        runtimeMode: ThreadRuntimeMode = .fullAccess,
+        interactionMode: ThreadInteractionMode = .default,
+        interactions: PendingThreadInteractions = PendingThreadInteractions()
     ) {
         self.id = id
         self.environmentId = environmentId
@@ -45,11 +53,15 @@ public struct AgentActivity: Identifiable, Equatable, Sendable {
         self.modelTitle = modelTitle
         self.phase = phase
         self.detail = detail
+        self.latestMessage = latestMessage
         self.planProgress = planProgress
         self.updatedAt = updatedAt
         self.deepLink = deepLink
         self.fingerprint = fingerprint
         self.needsReview = needsReview
+        self.runtimeMode = runtimeMode
+        self.interactionMode = interactionMode
+        self.interactions = interactions
     }
 
     public func withNeedsReview(_ needsReview: Bool) -> AgentActivity {
@@ -61,11 +73,15 @@ public struct AgentActivity: Identifiable, Equatable, Sendable {
             modelTitle: modelTitle,
             phase: phase,
             detail: detail,
+            latestMessage: latestMessage,
             planProgress: planProgress,
             updatedAt: updatedAt,
             deepLink: deepLink,
             fingerprint: fingerprint,
-            needsReview: needsReview
+            needsReview: needsReview,
+            runtimeMode: runtimeMode,
+            interactionMode: interactionMode,
+            interactions: interactions
         )
     }
 
@@ -78,11 +94,15 @@ public struct AgentActivity: Identifiable, Equatable, Sendable {
             modelTitle: modelTitle,
             phase: phase,
             detail: detail,
+            latestMessage: latestMessage,
             planProgress: planProgress,
             updatedAt: updatedAt,
             deepLink: deepLink,
             fingerprint: fingerprint,
-            needsReview: needsReview
+            needsReview: needsReview,
+            runtimeMode: runtimeMode,
+            interactionMode: interactionMode,
+            interactions: interactions
         )
     }
 }
@@ -111,6 +131,8 @@ public struct ActivityProjection: Sendable {
         snapshot: EnvironmentSnapshot,
         environmentId: String,
         changeRequestsByThreadId: [String: ChangeRequestStatus] = [:],
+        interactionsByThreadId: [String: PendingThreadInteractions] = [:],
+        latestMessagesByThreadId: [String: String] = [:],
         now: Date = Date()
     ) -> [AgentActivity] {
         let projects = Dictionary(uniqueKeysWithValues: snapshot.projects.map { ($0.id, $0.title) })
@@ -138,10 +160,14 @@ public struct ActivityProjection: Sendable {
                 modelTitle: thread.modelSelection.model,
                 phase: phase,
                 detail: detail,
+                latestMessage: latestMessagesByThreadId[thread.id],
                 planProgress: progress,
                 updatedAt: updatedAt,
                 deepLink: URL(string: "t3code://threads/\(encode(environmentId))/\(encode(thread.id))"),
-                fingerprint: fingerprint(for: phase, thread: thread)
+                fingerprint: fingerprint(for: phase, thread: thread),
+                runtimeMode: thread.runtimeMode,
+                interactionMode: thread.interactionMode,
+                interactions: interactionsByThreadId[thread.id] ?? PendingThreadInteractions()
             )
         }
         .sorted(by: sortActivities)

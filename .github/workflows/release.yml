@@ -7,6 +7,7 @@ on:
 
 env:
   RELEASE_TAG: ${{ github.ref_name }}
+  SPARKLE_PUBLIC_ED_KEY: ${{ vars.SPARKLE_PUBLIC_ED_KEY }}
 
 permissions:
   contents: read
@@ -29,16 +30,63 @@ jobs:
       - name: Validate version
         run: |
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test -n "$SPARKLE_PUBLIC_ED_KEY"
           version="${RELEASE_TAG#v}"
           plist_version="$(plutil -extract CFBundleShortVersionString raw Resources/Info.plist)"
           test "$version" = "$plist_version"
+      - name: Import Developer ID certificate
+        env:
+          DEVELOPER_ID_P12_BASE64: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          CI_KEYCHAIN_PASSWORD: ${{ secrets.CI_KEYCHAIN_PASSWORD }}
+        run: |
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          keychain_path="$RUNNER_TEMP/threadmark-signing.keychain-db"
+          printf '%s' "$DEVELOPER_ID_P12_BASE64" | base64 -D > "$certificate_path"
+          security create-keychain -p "$CI_KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$CI_KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" \
+            -P "$DEVELOPER_ID_P12_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$keychain_path"
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s -k "$CI_KEYCHAIN_PASSWORD" \
+            "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          identity="$(security find-identity -v -p codesigning "$keychain_path" \
+            | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' \
+            | head -1)"
+          test -n "$identity"
+          echo "CODE_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
       - name: Build disk image
         run: ./scripts/build-dmg.sh
+      - name: Sign and notarize disk image
+        env:
+          APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          archive="dist/Threadmark-$version-macOS-${{ matrix.arch }}.dmg"
+          api_key="$RUNNER_TEMP/AuthKey_$APP_STORE_CONNECT_KEY_ID.p8"
+          printf '%s' "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 -D > "$api_key"
+          codesign --force --timestamp --sign "$CODE_SIGN_IDENTITY" "$archive"
+          xcrun notarytool submit "$archive" \
+            --key "$api_key" \
+            --key-id "$APP_STORE_CONNECT_KEY_ID" \
+            --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
+            --wait
+          xcrun stapler staple "$archive"
+          xcrun stapler validate "$archive"
       - name: Verify architecture and signature
         run: |
           binary="dist/Threadmark.app/Contents/MacOS/Threadmark"
           test "$(lipo -archs "$binary")" = "${{ matrix.arch }}"
           codesign --verify --deep --strict "dist/Threadmark.app"
+          spctl --assess --type open --context context:primary-signature --verbose=2 \
+            "dist/Threadmark-${RELEASE_TAG#v}-macOS-${{ matrix.arch }}.dmg"
       - name: Package release
         run: |
           version="$(plutil -extract CFBundleShortVersionString raw Resources/Info.plist)"
@@ -55,8 +103,50 @@ jobs:
           path: release/
           if-no-files-found: error
 
-  publish:
+  appcast:
     needs: build
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: release
+          merge-multiple: true
+      - name: Generate appcast with signed updates
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          swift package resolve
+          for arch in arm64 x86_64; do
+            mkdir -p "updates/$arch"
+            cp release/*-"$arch".dmg "updates/$arch/"
+            printf '%s' "$SPARKLE_PRIVATE_KEY" \
+              | .build/artifacts/sparkle/Sparkle/bin/generate_appcast \
+                  --ed-key-file - \
+                  --download-url-prefix "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/" \
+                  --full-release-notes-url "https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG" \
+                  -o "appcast-$arch.xml" \
+                  "updates/$arch"
+          done
+          swift scripts/merge-appcasts.swift \
+            appcast-arm64.xml appcast-x86_64.xml appcast.xml
+          test -s appcast.xml
+          test "$(grep -c 'sparkle:edSignature=' appcast.xml)" = 2
+          grep -q '<sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>' \
+            appcast.xml
+          mkdir appcast
+          cp appcast.xml appcast/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: appcast
+          path: appcast/
+          if-no-files-found: error
+
+  publish:
+    needs: [build, appcast]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -66,6 +156,10 @@ jobs:
           pattern: release-*
           path: release
           merge-multiple: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: appcast
+          path: release
       - name: Create checksum manifest
         run: |
           cat release/*.sha256 > release/SHA256SUMS
@@ -76,6 +170,7 @@ jobs:
         run: |
           gh release create "$RELEASE_TAG" \
             release/*.dmg \
+            release/appcast.xml \
             release/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
