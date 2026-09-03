@@ -30,6 +30,34 @@ struct PairingTargetTests {
         #expect(target.httpBaseURL.absoluteString == "https://remote.example.test/")
     }
 
+    @Test func rejectsPublicHTTPHost() {
+        #expect(throws: PairingError.invalidHost) {
+            try PairingTarget(pairingURL: "http://example.com/pair#token=secret")
+        }
+        #expect(throws: PairingError.invalidHost) {
+            try PairingTarget(pairingURL: "http://fdexample.com/pair#token=secret")
+        }
+        #expect(throws: PairingError.invalidHost) {
+            try PairingTarget(pairingURL: "http://[2001:db8::1]/pair#token=secret")
+        }
+    }
+
+    @Test func acceptsTailscaleHTTPHosts() throws {
+        let address = try PairingTarget(
+            pairingURL: "http://100.100.10.20:44342/pair#token=secret"
+        )
+        let magicDNS = try PairingTarget(
+            pairingURL: "http://desktop.example.ts.net:44342/pair#token=secret"
+        )
+        let ipv6 = try PairingTarget(
+            pairingURL: "http://[fd7a:115c:a1e0::1]:44342/pair#token=secret"
+        )
+
+        #expect(address.httpBaseURL.absoluteString == "http://100.100.10.20:44342/")
+        #expect(magicDNS.httpBaseURL.absoluteString == "http://desktop.example.ts.net:44342/")
+        #expect(ipv6.httpBaseURL.absoluteString == "http://[fd7a:115c:a1e0::1]:44342/")
+    }
+
     @Test func rejectsMissingToken() {
         #expect(throws: PairingError.missingToken) {
             try PairingTarget(pairingURL: "https://remote.example.test/pair")
