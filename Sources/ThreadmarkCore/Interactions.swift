@@ -187,6 +187,10 @@ struct ThreadInteractionPayload: Decodable {
 }
 
 struct ThreadInteractionProjection: Sendable {
+    private enum ResponseMode: String {
+        case message
+    }
+
     func project(_ activities: [ThreadInteractionActivity]) -> PendingThreadInteractions {
         var approvals: [String: PendingApproval] = [:]
         var userInputs: [String: PendingUserInput] = [:]
@@ -214,7 +218,8 @@ struct ThreadInteractionProjection: Sendable {
                     requestId: requestId,
                     createdAt: activity.createdAt,
                     questions: questions,
-                    dismissible: activity.payload?.responseMode == "message"
+                    dismissible: activity.payload?.responseMode
+                        .flatMap(ResponseMode.init(rawValue:)) == .message
                 )
             case "user-input.resolved":
                 userInputs.removeValue(forKey: requestId)

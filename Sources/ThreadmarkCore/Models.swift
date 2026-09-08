@@ -281,17 +281,20 @@ public enum TurnState: String, Decodable, Sendable {
 public struct AgentSession: Decodable, Sendable {
     public let status: SessionStatus
     public let providerName: String?
+    public let activeTurnId: String?
     public let lastError: String?
     public let updatedAt: String
 
     public init(
         status: SessionStatus,
         providerName: String? = nil,
+        activeTurnId: String? = nil,
         lastError: String? = nil,
         updatedAt: String
     ) {
         self.status = status
         self.providerName = providerName
+        self.activeTurnId = activeTurnId
         self.lastError = lastError
         self.updatedAt = updatedAt
     }

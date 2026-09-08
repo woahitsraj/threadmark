@@ -27,7 +27,7 @@ public struct AgentActivity: Identifiable, Equatable, Sendable {
     public let runtimeMode: ThreadRuntimeMode
     public let interactionMode: ThreadInteractionMode
     public let interactions: PendingThreadInteractions
-    public let latestTurnId: String?
+    public let interruptTurnId: String?
     public let isSnoozed: Bool
 
     public init(
@@ -47,7 +47,7 @@ public struct AgentActivity: Identifiable, Equatable, Sendable {
         runtimeMode: ThreadRuntimeMode = .fullAccess,
         interactionMode: ThreadInteractionMode = .default,
         interactions: PendingThreadInteractions = PendingThreadInteractions(),
-        latestTurnId: String? = nil,
+        interruptTurnId: String? = nil,
         isSnoozed: Bool = false
     ) {
         self.id = id
@@ -66,52 +66,40 @@ public struct AgentActivity: Identifiable, Equatable, Sendable {
         self.runtimeMode = runtimeMode
         self.interactionMode = interactionMode
         self.interactions = interactions
-        self.latestTurnId = latestTurnId
+        self.interruptTurnId = interruptTurnId
         self.isSnoozed = isSnoozed
     }
 
     public func withNeedsReview(_ needsReview: Bool) -> AgentActivity {
-        AgentActivity(
-            id: id,
-            environmentId: environmentId,
-            projectTitle: projectTitle,
-            threadTitle: threadTitle,
-            modelTitle: modelTitle,
-            phase: phase,
-            detail: detail,
-            latestMessage: latestMessage,
-            planProgress: planProgress,
-            updatedAt: updatedAt,
-            deepLink: deepLink,
-            fingerprint: fingerprint,
-            needsReview: needsReview,
-            runtimeMode: runtimeMode,
-            interactionMode: interactionMode,
-            interactions: interactions,
-            latestTurnId: latestTurnId,
-            isSnoozed: isSnoozed
-        )
+        copy(needsReview: needsReview)
     }
 
     public func withPhase(_ phase: ActivityPhase) -> AgentActivity {
+        copy(phase: phase)
+    }
+
+    private func copy(
+        phase: ActivityPhase? = nil,
+        needsReview: Bool? = nil
+    ) -> AgentActivity {
         AgentActivity(
             id: id,
             environmentId: environmentId,
             projectTitle: projectTitle,
             threadTitle: threadTitle,
             modelTitle: modelTitle,
-            phase: phase,
+            phase: phase ?? self.phase,
             detail: detail,
             latestMessage: latestMessage,
             planProgress: planProgress,
             updatedAt: updatedAt,
             deepLink: deepLink,
             fingerprint: fingerprint,
-            needsReview: needsReview,
+            needsReview: needsReview ?? self.needsReview,
             runtimeMode: runtimeMode,
             interactionMode: interactionMode,
             interactions: interactions,
-            latestTurnId: latestTurnId,
+            interruptTurnId: interruptTurnId,
             isSnoozed: isSnoozed
         )
     }
@@ -144,6 +132,7 @@ public struct ActivityProjection: Sendable {
         interactionsByThreadId: [String: PendingThreadInteractions] = [:],
         latestMessagesByThreadId: [String: String] = [:],
         usesServerAutoSettlement: Bool = false,
+        usesServerSnooze: Bool = false,
         now: Date = Date()
     ) -> [AgentActivity] {
         let projects = Dictionary(uniqueKeysWithValues: snapshot.projects.map { ($0.id, $0.title) })
@@ -180,8 +169,8 @@ public struct ActivityProjection: Sendable {
                 runtimeMode: thread.runtimeMode,
                 interactionMode: thread.interactionMode,
                 interactions: interactionsByThreadId[thread.id] ?? PendingThreadInteractions(),
-                latestTurnId: thread.latestTurn?.turnId,
-                isSnoozed: isEffectivelySnoozed(thread, now: now)
+                interruptTurnId: thread.session?.activeTurnId ?? thread.latestTurn?.turnId,
+                isSnoozed: usesServerSnooze && isEffectivelySnoozed(thread, now: now)
             )
         }
         .sorted(by: sortActivities)

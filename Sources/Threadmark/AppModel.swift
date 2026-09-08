@@ -275,9 +275,7 @@ final class AppModel: ObservableObject {
         requestId: String,
         decision: ApprovalDecision
     ) async {
-        guard let connection, let accessToken else { return }
-        do {
-            errorMessage = nil
+        await performInteraction { connection, accessToken in
             try await source.respondToApproval(
                 threadId: activity.id,
                 requestId: requestId,
@@ -285,9 +283,6 @@ final class AppModel: ObservableObject {
                 configuration: connection,
                 accessToken: accessToken
             )
-            await pollOnce()
-        } catch {
-            errorMessage = error.localizedDescription
         }
     }
 
@@ -296,9 +291,7 @@ final class AppModel: ObservableObject {
         requestId: String,
         answers: [String: UserInputAnswer]
     ) async {
-        guard let connection, let accessToken else { return }
-        do {
-            errorMessage = nil
+        await performInteraction { connection, accessToken in
             try await source.respondToUserInput(
                 threadId: activity.id,
                 requestId: requestId,
@@ -306,38 +299,38 @@ final class AppModel: ObservableObject {
                 configuration: connection,
                 accessToken: accessToken
             )
-            await pollOnce()
-        } catch {
-            errorMessage = error.localizedDescription
         }
     }
 
     func dismissUserInput(in activity: AgentActivity, requestId: String) async {
-        guard let connection, let accessToken else { return }
-        do {
-            errorMessage = nil
+        await performInteraction { connection, accessToken in
             try await source.dismissUserInput(
                 threadId: activity.id,
                 requestId: requestId,
                 configuration: connection,
                 accessToken: accessToken
             )
-            await pollOnce()
-        } catch {
-            errorMessage = error.localizedDescription
         }
     }
 
     func stop(_ activity: AgentActivity) async {
-        guard let connection, let accessToken else { return }
-        do {
-            errorMessage = nil
+        await performInteraction { connection, accessToken in
             try await source.interruptTurn(
                 threadId: activity.id,
-                turnId: activity.latestTurnId,
+                turnId: activity.interruptTurnId,
                 configuration: connection,
                 accessToken: accessToken
             )
+        }
+    }
+
+    private func performInteraction(
+        _ operation: (ConnectionConfiguration, String) async throws -> Void
+    ) async {
+        guard let connection, let accessToken else { return }
+        do {
+            errorMessage = nil
+            try await operation(connection, accessToken)
             await pollOnce()
         } catch {
             errorMessage = error.localizedDescription
@@ -463,12 +456,14 @@ final class AppModel: ObservableObject {
             changeRequestsByThreadId: snapshot.changeRequestsByThreadId,
             interactionsByThreadId: snapshot.interactionsByThreadId,
             latestMessagesByThreadId: snapshot.latestMessagesByThreadId,
-            usesServerAutoSettlement: connection.capabilities.threadAutoSettlement == true
+            usesServerAutoSettlement: connection.capabilities.threadAutoSettlement == true,
+            usesServerSnooze: connection.capabilities.threadSnooze == true
         )
         let transitions = tracker.observe(projected)
+        _ = reviewTracker.update(activities: projected, transitions: transitions)
         let visible = projected.filter { !$0.isSnoozed }
         projectedActivities = visible
-        activities = reviewTracker.update(activities: visible, transitions: transitions)
+        activities = reviewTracker.visibleActivities(from: visible)
         persistence.save(
             unreviewedFingerprints: reviewTracker.unreviewedFingerprints,
             for: connection.environmentId

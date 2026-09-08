@@ -19,7 +19,21 @@ struct DoneReviewTrackerTests {
         #expect(tracker.visibleActivities(from: [done]).first?.needsReview == false)
     }
 
-    private func activity(fingerprint: String) -> AgentActivity {
+    @Test func snoozingDoesNotClearUnreviewedCompletion() {
+        let done = activity(fingerprint: "turn-1")
+        let snoozedDone = activity(fingerprint: "turn-1", isSnoozed: true)
+        var tracker = DoneReviewTracker()
+
+        _ = tracker.update(
+            activities: [done],
+            transitions: [ActivityTransition(activity: done)]
+        )
+        _ = tracker.update(activities: [snoozedDone], transitions: [])
+
+        #expect(tracker.unreviewedFingerprints == [done.fingerprint])
+    }
+
+    private func activity(fingerprint: String, isSnoozed: Bool = false) -> AgentActivity {
         AgentActivity(
             id: "thread-1",
             environmentId: "env-1",
@@ -31,7 +45,8 @@ struct DoneReviewTrackerTests {
             planProgress: nil,
             updatedAt: .now,
             deepLink: URL(string: "t3code://app/threads/env-1/thread-1"),
-            fingerprint: fingerprint
+            fingerprint: fingerprint,
+            isSnoozed: isSnoozed
         )
     }
 }

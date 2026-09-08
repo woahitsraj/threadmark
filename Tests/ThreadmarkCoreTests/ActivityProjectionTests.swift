@@ -186,6 +186,20 @@ struct ActivityProjectionTests {
         ).count == 1)
     }
 
+    @Test func startingThreadUsesSessionActiveTurnForInterrupt() throws {
+        let activity = try #require(projection.project(
+            snapshot: decodeSnapshot(
+                sessionStatus: "starting",
+                turnState: "completed",
+                activeTurnId: "turn-2"
+            ),
+            environmentId: "env-1",
+            now: Date(timeIntervalSince1970: 1_800_000_000)
+        ).first)
+
+        #expect(activity.interruptTurnId == "turn-2")
+    }
+
     @Test func futureSnoozeHidesThreadUntilItRaisesItsHand() throws {
         let snoozed = try #require(projection.project(
             snapshot: decodeSnapshot(
@@ -195,6 +209,7 @@ struct ActivityProjectionTests {
                 snoozedAt: "2027-01-15T08:00:00Z"
             ),
             environmentId: "env-1",
+            usesServerSnooze: true,
             now: Date(timeIntervalSince1970: 1_800_000_000)
         ).first)
         let needsApproval = try #require(projection.project(
@@ -206,11 +221,27 @@ struct ActivityProjectionTests {
                 snoozedAt: "2027-01-15T08:00:00Z"
             ),
             environmentId: "env-1",
+            usesServerSnooze: true,
             now: Date(timeIntervalSince1970: 1_800_000_000)
         ).first)
 
         #expect(snoozed.isSnoozed)
         #expect(needsApproval.isSnoozed == false)
+    }
+
+    @Test func ignoresSnoozeFieldsWithoutServerCapability() throws {
+        let activity = try #require(projection.project(
+            snapshot: decodeSnapshot(
+                sessionStatus: "running",
+                turnState: "running",
+                snoozedUntil: "2027-01-15T10:00:00Z",
+                snoozedAt: "2027-01-15T08:00:00Z"
+            ),
+            environmentId: "env-1",
+            now: Date(timeIntervalSince1970: 1_800_000_000)
+        ).first)
+
+        #expect(activity.isSnoozed == false)
     }
 
     @Test func snoozedRunningThreadStillNotifiesOnCompletion() throws {
@@ -222,6 +253,7 @@ struct ActivityProjectionTests {
                 snoozedAt: "2027-01-15T08:00:00Z"
             ),
             environmentId: "env-1",
+            usesServerSnooze: true,
             now: Date(timeIntervalSince1970: 1_800_000_000)
         )
         let completed = projection.project(
@@ -232,6 +264,7 @@ struct ActivityProjectionTests {
                 snoozedAt: "2027-01-15T07:59:00Z"
             ),
             environmentId: "env-1",
+            usesServerSnooze: true,
             now: Date(timeIntervalSince1970: 1_800_000_000)
         )
         var tracker = ActivityTracker()
@@ -336,6 +369,7 @@ struct ActivityProjectionTests {
         hasPendingApprovals: Bool = false,
         settledOverride: String? = nil,
         latestUserMessageAt: String? = nil,
+        activeTurnId: String? = nil,
         snoozedUntil: String? = nil,
         snoozedAt: String? = nil
     ) throws -> EnvironmentSnapshot {
@@ -353,6 +387,7 @@ struct ActivityProjectionTests {
             """
         } ?? "null"
         let latestUserMessage = latestUserMessageAt.map { "\"\($0)\"" } ?? "null"
+        let activeTurn = activeTurnId.map { "\"\($0)\"" } ?? "null"
         let snooze = """
         , "snoozedUntil": \(snoozedUntil.map { "\"\($0)\"" } ?? "null")
         , "snoozedAt": \(snoozedAt.map { "\"\($0)\"" } ?? "null")
@@ -371,6 +406,7 @@ struct ActivityProjectionTests {
             "session": {
               "status": "\(sessionStatus)",
               "providerName": "Codex",
+              "activeTurnId": \(activeTurn),
               "lastError": null,
               "updatedAt": "2027-01-15T08:00:00.123Z"
             },
