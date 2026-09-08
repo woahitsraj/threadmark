@@ -94,6 +94,9 @@ final class AppModel: ObservableObject {
                 answers: [questionId: answer]
             ) }
         }
+        notifications.onUserInputDismiss = { [weak self] target, requestId in
+            Task { await self?.dismissUserInput(in: target, requestId: requestId) }
+        }
         notifications.onMarkRead = { [weak self] target in
             self?.markRead(target)
         }
@@ -115,14 +118,16 @@ final class AppModel: ObservableObject {
                 persistence.clearConnection()
                 return
             }
-            connection = saved
+            let current = (try? await source.refreshConfiguration(saved)) ?? saved
+            if current != saved { try? persistence.save(connection: current) }
+            connection = current
             accessToken = token
             tracker = ActivityTracker(
-                fingerprints: persistence.fingerprints(for: saved.environmentId),
-                armedThreadIds: persistence.armedThreadIds(for: saved.environmentId)
+                fingerprints: persistence.fingerprints(for: current.environmentId),
+                armedThreadIds: persistence.armedThreadIds(for: current.environmentId)
             )
             reviewTracker = DoneReviewTracker(
-                unreviewedFingerprints: persistence.unreviewedFingerprints(for: saved.environmentId)
+                unreviewedFingerprints: persistence.unreviewedFingerprints(for: current.environmentId)
             )
             logger.notice("Starting background polling")
             startPolling()
@@ -307,6 +312,38 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func dismissUserInput(in activity: AgentActivity, requestId: String) async {
+        guard let connection, let accessToken else { return }
+        do {
+            errorMessage = nil
+            try await source.dismissUserInput(
+                threadId: activity.id,
+                requestId: requestId,
+                configuration: connection,
+                accessToken: accessToken
+            )
+            await pollOnce()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func stop(_ activity: AgentActivity) async {
+        guard let connection, let accessToken else { return }
+        do {
+            errorMessage = nil
+            try await source.interruptTurn(
+                threadId: activity.id,
+                turnId: activity.latestTurnId,
+                configuration: connection,
+                accessToken: accessToken
+            )
+            await pollOnce()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func markAllAsRead() {
         for activity in activities where activity.needsReview {
             reviewTracker.markReviewed(activity.fingerprint)
@@ -374,6 +411,14 @@ final class AppModel: ObservableObject {
         await respondToUserInput(in: activity, requestId: requestId, answers: answers)
     }
 
+    private func dismissUserInput(
+        in target: NotificationThreadTarget,
+        requestId: String
+    ) async {
+        guard let activity = activity(for: target) else { return }
+        await dismissUserInput(in: activity, requestId: requestId)
+    }
+
     private func markRead(_ target: NotificationThreadTarget) {
         guard let activity = activities.first(where: {
             $0.id == target.threadId && $0.fingerprint == target.fingerprint
@@ -417,11 +462,13 @@ final class AppModel: ObservableObject {
             environmentId: connection.environmentId,
             changeRequestsByThreadId: snapshot.changeRequestsByThreadId,
             interactionsByThreadId: snapshot.interactionsByThreadId,
-            latestMessagesByThreadId: snapshot.latestMessagesByThreadId
+            latestMessagesByThreadId: snapshot.latestMessagesByThreadId,
+            usesServerAutoSettlement: connection.capabilities.threadAutoSettlement == true
         )
         let transitions = tracker.observe(projected)
-        projectedActivities = projected
-        activities = reviewTracker.update(activities: projected, transitions: transitions)
+        let visible = projected.filter { !$0.isSnoozed }
+        projectedActivities = visible
+        activities = reviewTracker.update(activities: visible, transitions: transitions)
         persistence.save(
             unreviewedFingerprints: reviewTracker.unreviewedFingerprints,
             for: connection.environmentId

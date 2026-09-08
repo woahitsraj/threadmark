@@ -4,6 +4,32 @@ public struct EnvironmentDescriptor: Decodable, Sendable {
     public let environmentId: String
     public let label: String
     public let serverVersion: String
+    public let capabilities: EnvironmentCapabilities
+
+    enum CodingKeys: String, CodingKey {
+        case environmentId, label, serverVersion, capabilities
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        environmentId = try values.decode(String.self, forKey: .environmentId)
+        label = try values.decode(String.self, forKey: .label)
+        serverVersion = try values.decode(String.self, forKey: .serverVersion)
+        capabilities = try values.decodeIfPresent(
+            EnvironmentCapabilities.self,
+            forKey: .capabilities
+        ) ?? EnvironmentCapabilities()
+    }
+}
+
+public struct EnvironmentCapabilities: Codable, Equatable, Sendable {
+    public let threadAutoSettlement: Bool?
+    public let threadSnooze: Bool?
+
+    public init(threadAutoSettlement: Bool? = nil, threadSnooze: Bool? = nil) {
+        self.threadAutoSettlement = threadAutoSettlement
+        self.threadSnooze = threadSnooze
+    }
 }
 
 public struct AccessTokenResponse: Decodable, Sendable {
@@ -50,6 +76,8 @@ public struct ThreadShell: Decodable, Sendable {
     public let updatedAt: String
     public let settledOverride: SettledOverride?
     public let settledAt: String?
+    public let snoozedUntil: String?
+    public let snoozedAt: String?
     public let hasPendingApprovals: Bool
     public let hasPendingUserInput: Bool
     public let backgroundLiveness: BackgroundLiveness?
@@ -73,6 +101,8 @@ public struct ThreadShell: Decodable, Sendable {
         updatedAt: String,
         settledOverride: SettledOverride? = nil,
         settledAt: String? = nil,
+        snoozedUntil: String? = nil,
+        snoozedAt: String? = nil,
         hasPendingApprovals: Bool = false,
         hasPendingUserInput: Bool = false,
         backgroundLiveness: BackgroundLiveness? = nil,
@@ -95,6 +125,8 @@ public struct ThreadShell: Decodable, Sendable {
         self.updatedAt = updatedAt
         self.settledOverride = settledOverride
         self.settledAt = settledAt
+        self.snoozedUntil = snoozedUntil
+        self.snoozedAt = snoozedAt
         self.hasPendingApprovals = hasPendingApprovals
         self.hasPendingUserInput = hasPendingUserInput
         self.backgroundLiveness = backgroundLiveness
@@ -106,7 +138,7 @@ public struct ThreadShell: Decodable, Sendable {
         case id, projectId, title, createdAt, branch, worktreePath
         case modelSelection, runtimeMode, interactionMode, latestTurn, session, archivedAt
         case latestUserMessageAt, updatedAt
-        case settledOverride, settledAt
+        case settledOverride, settledAt, snoozedUntil, snoozedAt
         case hasPendingApprovals, hasPendingUserInput, backgroundLiveness, planProgress
         case linkedPullRequest
     }
@@ -130,6 +162,8 @@ public struct ThreadShell: Decodable, Sendable {
         updatedAt = try values.decode(String.self, forKey: .updatedAt)
         settledOverride = try values.decodeIfPresent(SettledOverride.self, forKey: .settledOverride)
         settledAt = try values.decodeIfPresent(String.self, forKey: .settledAt)
+        snoozedUntil = try values.decodeIfPresent(String.self, forKey: .snoozedUntil)
+        snoozedAt = try values.decodeIfPresent(String.self, forKey: .snoozedAt)
         hasPendingApprovals = try values.decodeIfPresent(Bool.self, forKey: .hasPendingApprovals) ?? false
         hasPendingUserInput = try values.decodeIfPresent(Bool.self, forKey: .hasPendingUserInput) ?? false
         backgroundLiveness = try values.decodeIfPresent(BackgroundLiveness.self, forKey: .backgroundLiveness)
@@ -289,17 +323,20 @@ public struct ConnectionConfiguration: Codable, Equatable, Sendable {
     public let environmentId: String
     public let label: String
     public let grantedScopes: [String]
+    public let capabilities: EnvironmentCapabilities
 
     public init(
         baseURL: URL,
         environmentId: String,
         label: String,
-        grantedScopes: [String] = ["orchestration:read"]
+        grantedScopes: [String] = ["orchestration:read"],
+        capabilities: EnvironmentCapabilities = EnvironmentCapabilities()
     ) {
         self.baseURL = baseURL
         self.environmentId = environmentId
         self.label = label
         self.grantedScopes = grantedScopes
+        self.capabilities = capabilities
     }
 
     public var canOperate: Bool {
@@ -307,7 +344,7 @@ public struct ConnectionConfiguration: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case baseURL, environmentId, label, grantedScopes
+        case baseURL, environmentId, label, grantedScopes, capabilities
     }
 
     public init(from decoder: Decoder) throws {
@@ -317,6 +354,10 @@ public struct ConnectionConfiguration: Codable, Equatable, Sendable {
         label = try values.decode(String.self, forKey: .label)
         grantedScopes = try values.decodeIfPresent([String].self, forKey: .grantedScopes)
             ?? ["orchestration:read"]
+        capabilities = try values.decodeIfPresent(
+            EnvironmentCapabilities.self,
+            forKey: .capabilities
+        ) ?? EnvironmentCapabilities()
     }
 }
 

@@ -9,13 +9,15 @@ Threadmark is a small native macOS menu-bar companion for T3 Code. It watches yo
 - Shows every unsettled thread, including idle, finished, and newly completed work.
 - Posts native notifications for completion, failure, approval, and input states.
 - Lets you reply, answer approvals, and respond to single-question pickers from notifications.
-- Shows reply, approval, and structured-input controls inside the menu bar.
+- Shows reply, stop, approval, and structured-input controls inside the menu bar.
+- Lets you dismiss asynchronous questions without restarting the agent.
 - Marks every unreviewed completion as read with one button.
 - Checks GitHub Releases for signed updates and offers to install them.
 - Defers completion while T3 reports background agents or monitoring work.
 - Stores the bearer credential in macOS Keychain.
 - Opens the matching thread in the native T3 Code app when you click a row or notification.
-- Ignores threads that T3 has marked as settled or left inactive for its default three-day settlement window.
+- Ignores server-settled threads, with a three-day compatibility fallback for older T3 servers.
+- Honors T3's server-side settlement and snoozed-thread state when supported.
 - Lets the menu-bar number count working threads, unreviewed Done threads, or both.
 - Works with any reachable T3 endpoint, including a pairing URL routed through a T3 Connect managed tunnel, Tailscale, or Cloudflare Tunnel.
 

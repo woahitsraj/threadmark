@@ -279,6 +279,15 @@ private struct ActivityRow: View {
             } else {
                 LockedControls()
             }
+        } else if [.starting, .running].contains(activity.phase), model.canInteract {
+            HStack {
+                Spacer()
+                Button("Stop", role: .destructive) {
+                    Task { await model.stop(activity) }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
         } else if [.idle, .done, .failed].contains(activity.phase) {
             if model.canInteract {
                 ReplyControls(activity: activity, model: model)
@@ -435,6 +444,16 @@ private struct UserInputControls: View {
                 }
             }
             HStack {
+                if input.dismissible {
+                    Button("Dismiss", role: .destructive) {
+                        Task { await model.dismissUserInput(
+                            in: activity,
+                            requestId: input.requestId
+                        ) }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
                 Spacer()
                 Button("Submit answers") {
                     Task { await model.respondToUserInput(

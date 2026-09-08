@@ -27,6 +27,8 @@ public struct AgentActivity: Identifiable, Equatable, Sendable {
     public let runtimeMode: ThreadRuntimeMode
     public let interactionMode: ThreadInteractionMode
     public let interactions: PendingThreadInteractions
+    public let latestTurnId: String?
+    public let isSnoozed: Bool
 
     public init(
         id: String,
@@ -44,7 +46,9 @@ public struct AgentActivity: Identifiable, Equatable, Sendable {
         needsReview: Bool = false,
         runtimeMode: ThreadRuntimeMode = .fullAccess,
         interactionMode: ThreadInteractionMode = .default,
-        interactions: PendingThreadInteractions = PendingThreadInteractions()
+        interactions: PendingThreadInteractions = PendingThreadInteractions(),
+        latestTurnId: String? = nil,
+        isSnoozed: Bool = false
     ) {
         self.id = id
         self.environmentId = environmentId
@@ -62,6 +66,8 @@ public struct AgentActivity: Identifiable, Equatable, Sendable {
         self.runtimeMode = runtimeMode
         self.interactionMode = interactionMode
         self.interactions = interactions
+        self.latestTurnId = latestTurnId
+        self.isSnoozed = isSnoozed
     }
 
     public func withNeedsReview(_ needsReview: Bool) -> AgentActivity {
@@ -81,7 +87,9 @@ public struct AgentActivity: Identifiable, Equatable, Sendable {
             needsReview: needsReview,
             runtimeMode: runtimeMode,
             interactionMode: interactionMode,
-            interactions: interactions
+            interactions: interactions,
+            latestTurnId: latestTurnId,
+            isSnoozed: isSnoozed
         )
     }
 
@@ -102,7 +110,9 @@ public struct AgentActivity: Identifiable, Equatable, Sendable {
             needsReview: needsReview,
             runtimeMode: runtimeMode,
             interactionMode: interactionMode,
-            interactions: interactions
+            interactions: interactions,
+            latestTurnId: latestTurnId,
+            isSnoozed: isSnoozed
         )
     }
 }
@@ -133,6 +143,7 @@ public struct ActivityProjection: Sendable {
         changeRequestsByThreadId: [String: ChangeRequestStatus] = [:],
         interactionsByThreadId: [String: PendingThreadInteractions] = [:],
         latestMessagesByThreadId: [String: String] = [:],
+        usesServerAutoSettlement: Bool = false,
         now: Date = Date()
     ) -> [AgentActivity] {
         let projects = Dictionary(uniqueKeysWithValues: snapshot.projects.map { ($0.id, $0.title) })
@@ -140,6 +151,7 @@ public struct ActivityProjection: Sendable {
             guard !isSettled(
                 thread,
                 changeRequest: changeRequestsByThreadId[thread.id],
+                usesServerAutoSettlement: usesServerAutoSettlement,
                 now: now
             ) else { return nil }
             let phase = phase(for: thread)
@@ -167,7 +179,9 @@ public struct ActivityProjection: Sendable {
                 fingerprint: fingerprint(for: phase, thread: thread),
                 runtimeMode: thread.runtimeMode,
                 interactionMode: thread.interactionMode,
-                interactions: interactionsByThreadId[thread.id] ?? PendingThreadInteractions()
+                interactions: interactionsByThreadId[thread.id] ?? PendingThreadInteractions(),
+                latestTurnId: thread.latestTurn?.turnId,
+                isSnoozed: isEffectivelySnoozed(thread, now: now)
             )
         }
         .sorted(by: sortActivities)
@@ -188,6 +202,7 @@ public struct ActivityProjection: Sendable {
     private func isSettled(
         _ thread: ThreadShell,
         changeRequest: ChangeRequestStatus?,
+        usesServerAutoSettlement: Bool,
         now: Date
     ) -> Bool {
         if thread.archivedAt != nil { return true }
@@ -205,12 +220,30 @@ public struct ActivityProjection: Sendable {
         }
         if thread.settledOverride == .settled { return true }
         if thread.settledOverride == .active { return false }
+        if usesServerAutoSettlement { return false }
 
         if changeRequestAutoSettles(changeRequest, thread: thread) { return true }
         if changeRequest?.state == .open { return false }
 
         guard let lastActivity = threadLastActivityAt(thread) else { return false }
         return lastActivity < now.addingTimeInterval(-autoSettleAfterDays * 24 * 60 * 60)
+    }
+
+    private func isEffectivelySnoozed(_ thread: ThreadShell, now: Date) -> Bool {
+        guard let wakeAt = thread.snoozedUntil.flatMap(parseDate), wakeAt > now else { return false }
+        if thread.hasPendingApprovals || thread.hasPendingUserInput { return false }
+        if let session = thread.session, session.status == .error {
+            guard let snoozedAt = thread.snoozedAt.flatMap(parseDate),
+                  let failedAt = parseDate(session.updatedAt),
+                  failedAt <= snoozedAt else { return false }
+        }
+        if thread.latestTurn?.state == .completed,
+           let snoozedAt = thread.snoozedAt.flatMap(parseDate),
+           let completedAt = thread.latestTurn?.completedAt.flatMap(parseDate),
+           completedAt > snoozedAt {
+            return false
+        }
+        return true
     }
 
     private func hasQueuedTurnStart(_ thread: ThreadShell, now: Date) -> Bool {
@@ -332,6 +365,7 @@ public struct ActivityTracker: Sendable {
                     nextArmed.insert(activity.id)
                     continue
                 }
+                if activity.isSnoozed { continue }
                 if previouslyArmed.contains(activity.id), [.idle, .done].contains(activity.phase) {
                     transitions.append(ActivityTransition(activity: activity.withPhase(.done)))
                     nextArmed.remove(activity.id)

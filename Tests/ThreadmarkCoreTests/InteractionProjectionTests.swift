@@ -47,6 +47,7 @@ struct InteractionProjectionTests {
             "createdAt": "2026-08-27T10:00:00Z",
             "payload": {
               "requestId": "input-1",
+              "responseMode": "message",
               "questions": [{
                 "id": "release",
                 "header": "Release",
@@ -63,6 +64,27 @@ struct InteractionProjectionTests {
         #expect(pending.userInputs.first?.questions.first?.id == "release")
         #expect(pending.userInputs.first?.questions.first?.multiSelect == false)
         #expect(pending.userInputs.first?.questions.first?.options.first?.label == "Beta")
+        #expect(pending.userInputs.first?.dismissible == true)
+    }
+
+    @Test func nativeQuestionsAreNotDismissible() throws {
+        let activities = try decodeActivities("""
+        [{
+          "kind": "user-input.requested",
+          "createdAt": "2026-08-27T10:00:00Z",
+          "payload": {
+            "requestId": "input-1",
+            "questions": [{
+              "id": "release",
+              "header": "Release",
+              "question": "Which channel?",
+              "options": []
+            }]
+          }
+        }]
+        """)
+
+        #expect(ThreadInteractionProjection().project(activities).userInputs.first?.dismissible == false)
     }
 
     @Test func selectsLatestAssistantMessage() throws {

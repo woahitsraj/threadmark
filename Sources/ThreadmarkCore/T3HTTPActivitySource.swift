@@ -3,6 +3,7 @@ import OSLog
 
 public protocol ActivitySource: Sendable {
     func pair(using pairingURL: String) async throws -> PairedEnvironment
+    func refreshConfiguration(_ configuration: ConnectionConfiguration) async throws -> ConnectionConfiguration
     func snapshot(configuration: ConnectionConfiguration, accessToken: String) async throws -> ActivitySnapshot
     func startTurn(
         threadId: String,
@@ -23,6 +24,18 @@ public protocol ActivitySource: Sendable {
         threadId: String,
         requestId: String,
         answers: [String: UserInputAnswer],
+        configuration: ConnectionConfiguration,
+        accessToken: String
+    ) async throws
+    func dismissUserInput(
+        threadId: String,
+        requestId: String,
+        configuration: ConnectionConfiguration,
+        accessToken: String
+    ) async throws
+    func interruptTurn(
+        threadId: String,
+        turnId: String?,
         configuration: ConnectionConfiguration,
         accessToken: String
     ) async throws
@@ -121,13 +134,33 @@ public actor T3HTTPActivitySource: ActivitySource {
             baseURL: target.httpBaseURL,
             environmentId: descriptor.environmentId,
             label: descriptor.label,
-            grantedScopes: scopes
+            grantedScopes: scopes,
+            capabilities: descriptor.capabilities
         )
         let initial = try await snapshot(configuration: configuration, accessToken: token.accessToken)
         return PairedEnvironment(
             configuration: configuration,
             accessToken: token.accessToken,
             initialSnapshot: initial
+        )
+    }
+
+    public func refreshConfiguration(
+        _ configuration: ConnectionConfiguration
+    ) async throws -> ConnectionConfiguration {
+        let descriptor: EnvironmentDescriptor = try await get(
+            url: endpoint("/.well-known/t3/environment", at: configuration.baseURL),
+            bearerToken: nil
+        )
+        guard descriptor.environmentId == configuration.environmentId else {
+            throw T3HTTPError.invalidPayload("The T3 environment identity changed.")
+        }
+        return ConnectionConfiguration(
+            baseURL: configuration.baseURL,
+            environmentId: descriptor.environmentId,
+            label: descriptor.label,
+            grantedScopes: configuration.grantedScopes,
+            capabilities: descriptor.capabilities
         )
     }
 
@@ -139,11 +172,15 @@ public actor T3HTTPActivitySource: ActivitySource {
             url: endpoint("/api/orchestration/shell", at: configuration.baseURL),
             bearerToken: accessToken
         )
-        let statuses = await changeRequestStatuses(
-            for: environment,
-            configuration: configuration,
-            accessToken: accessToken
-        )
+        let statuses = if configuration.capabilities.threadAutoSettlement == true {
+            [String: ChangeRequestStatus]()
+        } else {
+            await changeRequestStatuses(
+                for: environment,
+                configuration: configuration,
+                accessToken: accessToken
+            )
+        }
         let details = await threadDetails(
             for: environment,
             configuration: configuration,
@@ -219,6 +256,37 @@ public actor T3HTTPActivitySource: ActivitySource {
             "answers": payload,
             "createdAt": timestamp(),
         ], configuration: configuration, accessToken: accessToken)
+    }
+
+    public func dismissUserInput(
+        threadId: String,
+        requestId: String,
+        configuration: ConnectionConfiguration,
+        accessToken: String
+    ) async throws {
+        try await dispatch([
+            "type": "thread.user-input.dismiss",
+            "commandId": UUID().uuidString.lowercased(),
+            "threadId": threadId,
+            "requestId": requestId,
+            "createdAt": timestamp(),
+        ], configuration: configuration, accessToken: accessToken)
+    }
+
+    public func interruptTurn(
+        threadId: String,
+        turnId: String?,
+        configuration: ConnectionConfiguration,
+        accessToken: String
+    ) async throws {
+        var command: [String: Any] = [
+            "type": "thread.turn.interrupt",
+            "commandId": UUID().uuidString.lowercased(),
+            "threadId": threadId,
+            "createdAt": timestamp(),
+        ]
+        if let turnId { command["turnId"] = turnId }
+        try await dispatch(command, configuration: configuration, accessToken: accessToken)
     }
 
     private func threadDetails(
