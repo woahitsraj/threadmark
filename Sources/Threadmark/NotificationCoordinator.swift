@@ -8,6 +8,7 @@ private enum ThreadmarkNotificationAction: Sendable {
     case markRead
     case approval(requestId: String, decision: ApprovalDecision)
     case userInput(requestId: String, questionId: String, answer: UserInputAnswer)
+    case dismissUserInput(requestId: String)
     case ignore
 }
 
@@ -19,6 +20,7 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
     var onReply: ((NotificationThreadTarget, String) -> Void)?
     var onApproval: ((NotificationThreadTarget, String, ApprovalDecision) -> Void)?
     var onUserInput: ((NotificationThreadTarget, String, String, UserInputAnswer) -> Void)?
+    var onUserInputDismiss: ((NotificationThreadTarget, String) -> Void)?
     var onMarkRead: ((NotificationThreadTarget) -> Void)?
 
     override init() {
@@ -124,6 +126,12 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
             } else {
                 action = .ignore
             }
+        case "threadmark.input.dismiss":
+            if let requestId = userInfo["requestId"] as? String {
+                action = .dismissUserInput(requestId: requestId)
+            } else {
+                action = .ignore
+            }
         default:
             action = .ignore
         }
@@ -139,6 +147,8 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
                 self.onApproval?(target, requestId, decision)
             case let .userInput(requestId, questionId, answer):
                 self.onUserInput?(target, requestId, questionId, answer)
+            case let .dismissUserInput(requestId):
+                self.onUserInputDismiss?(target, requestId)
             case .ignore:
                 break
             }
@@ -203,7 +213,8 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
             content.userInfo["optionLabels"] = question.options.map(\.label)
             var actions: [UNNotificationAction] = []
             if !question.multiSelect {
-                actions.append(contentsOf: question.options.prefix(3).enumerated().map { index, option in
+                let optionLimit = input.dismissible ? 2 : 3
+                actions.append(contentsOf: question.options.prefix(optionLimit).enumerated().map { index, option in
                     UNNotificationAction(
                         identifier: "threadmark.input.option.\(index)",
                         title: option.label,
@@ -218,6 +229,13 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
                 textInputButtonTitle: "Send",
                 textInputPlaceholder: question.question
             ))
+            if input.dismissible {
+                actions.append(UNNotificationAction(
+                    identifier: "threadmark.input.dismiss",
+                    title: "Dismiss",
+                    options: [.authenticationRequired, .destructive]
+                ))
+            }
             return UNNotificationCategory(
                 identifier: identifier,
                 actions: actions,

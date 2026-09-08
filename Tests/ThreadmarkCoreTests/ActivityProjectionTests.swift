@@ -175,6 +175,106 @@ struct ActivityProjectionTests {
         ).isEmpty)
     }
 
+    @Test func serverAutoSettlementDisablesLocalFallback() throws {
+        let snapshot = try decodeSnapshot(sessionStatus: "ready", turnState: "completed")
+
+        #expect(projection.project(
+            snapshot: snapshot,
+            environmentId: "env-1",
+            usesServerAutoSettlement: true,
+            now: Date(timeIntervalSince1970: 1_800_259_201)
+        ).count == 1)
+    }
+
+    @Test func startingThreadUsesSessionActiveTurnForInterrupt() throws {
+        let activity = try #require(projection.project(
+            snapshot: decodeSnapshot(
+                sessionStatus: "starting",
+                turnState: "completed",
+                activeTurnId: "turn-2"
+            ),
+            environmentId: "env-1",
+            now: Date(timeIntervalSince1970: 1_800_000_000)
+        ).first)
+
+        #expect(activity.interruptTurnId == "turn-2")
+    }
+
+    @Test func futureSnoozeHidesThreadUntilItRaisesItsHand() throws {
+        let snoozed = try #require(projection.project(
+            snapshot: decodeSnapshot(
+                sessionStatus: "running",
+                turnState: "running",
+                snoozedUntil: "2027-01-15T10:00:00Z",
+                snoozedAt: "2027-01-15T08:00:00Z"
+            ),
+            environmentId: "env-1",
+            usesServerSnooze: true,
+            now: Date(timeIntervalSince1970: 1_800_000_000)
+        ).first)
+        let needsApproval = try #require(projection.project(
+            snapshot: decodeSnapshot(
+                sessionStatus: "running",
+                turnState: "running",
+                hasPendingApprovals: true,
+                snoozedUntil: "2027-01-15T10:00:00Z",
+                snoozedAt: "2027-01-15T08:00:00Z"
+            ),
+            environmentId: "env-1",
+            usesServerSnooze: true,
+            now: Date(timeIntervalSince1970: 1_800_000_000)
+        ).first)
+
+        #expect(snoozed.isSnoozed)
+        #expect(needsApproval.isSnoozed == false)
+    }
+
+    @Test func ignoresSnoozeFieldsWithoutServerCapability() throws {
+        let activity = try #require(projection.project(
+            snapshot: decodeSnapshot(
+                sessionStatus: "running",
+                turnState: "running",
+                snoozedUntil: "2027-01-15T10:00:00Z",
+                snoozedAt: "2027-01-15T08:00:00Z"
+            ),
+            environmentId: "env-1",
+            now: Date(timeIntervalSince1970: 1_800_000_000)
+        ).first)
+
+        #expect(activity.isSnoozed == false)
+    }
+
+    @Test func snoozedRunningThreadStillNotifiesOnCompletion() throws {
+        let running = projection.project(
+            snapshot: try decodeSnapshot(
+                sessionStatus: "running",
+                turnState: "running",
+                snoozedUntil: "2027-01-15T10:00:00Z",
+                snoozedAt: "2027-01-15T08:00:00Z"
+            ),
+            environmentId: "env-1",
+            usesServerSnooze: true,
+            now: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+        let completed = projection.project(
+            snapshot: try decodeSnapshot(
+                sessionStatus: "ready",
+                turnState: "completed",
+                snoozedUntil: "2027-01-15T10:00:00Z",
+                snoozedAt: "2027-01-15T07:59:00Z"
+            ),
+            environmentId: "env-1",
+            usesServerSnooze: true,
+            now: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+        var tracker = ActivityTracker()
+
+        #expect(tracker.observe(running).isEmpty)
+        #expect(running.first?.isSnoozed == true)
+        #expect(completed.first?.isSnoozed == false)
+        #expect(tracker.observe(completed).map(\.activity.phase) == [.done])
+    }
+
     @Test func activeBackgroundWorkIsNeverAutoSettled() throws {
         let snapshot = try decodeSnapshot(
             sessionStatus: "ready",
@@ -268,7 +368,10 @@ struct ActivityProjectionTests {
         backgroundLiveness: String? = nil,
         hasPendingApprovals: Bool = false,
         settledOverride: String? = nil,
-        latestUserMessageAt: String? = nil
+        latestUserMessageAt: String? = nil,
+        activeTurnId: String? = nil,
+        snoozedUntil: String? = nil,
+        snoozedAt: String? = nil
     ) throws -> EnvironmentSnapshot {
         let background = backgroundLiveness.map { #", "backgroundLiveness": "\#($0)""# } ?? ""
         let settled = settledOverride.map {
@@ -284,6 +387,11 @@ struct ActivityProjectionTests {
             """
         } ?? "null"
         let latestUserMessage = latestUserMessageAt.map { "\"\($0)\"" } ?? "null"
+        let activeTurn = activeTurnId.map { "\"\($0)\"" } ?? "null"
+        let snooze = """
+        , "snoozedUntil": \(snoozedUntil.map { "\"\($0)\"" } ?? "null")
+        , "snoozedAt": \(snoozedAt.map { "\"\($0)\"" } ?? "null")
+        """
         let json = """
         {
           "snapshotSequence": 1,
@@ -298,6 +406,7 @@ struct ActivityProjectionTests {
             "session": {
               "status": "\(sessionStatus)",
               "providerName": "Codex",
+              "activeTurnId": \(activeTurn),
               "lastError": null,
               "updatedAt": "2027-01-15T08:00:00.123Z"
             },
@@ -307,6 +416,7 @@ struct ActivityProjectionTests {
             "hasPendingUserInput": false
             \(background)
             \(settled)
+            \(snooze)
           }],
           "updatedAt": "2027-01-15T08:00:00Z"
         }

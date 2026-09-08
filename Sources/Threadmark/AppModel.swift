@@ -94,6 +94,9 @@ final class AppModel: ObservableObject {
                 answers: [questionId: answer]
             ) }
         }
+        notifications.onUserInputDismiss = { [weak self] target, requestId in
+            Task { await self?.dismissUserInput(in: target, requestId: requestId) }
+        }
         notifications.onMarkRead = { [weak self] target in
             self?.markRead(target)
         }
@@ -115,14 +118,16 @@ final class AppModel: ObservableObject {
                 persistence.clearConnection()
                 return
             }
-            connection = saved
+            let current = (try? await source.refreshConfiguration(saved)) ?? saved
+            if current != saved { try? persistence.save(connection: current) }
+            connection = current
             accessToken = token
             tracker = ActivityTracker(
-                fingerprints: persistence.fingerprints(for: saved.environmentId),
-                armedThreadIds: persistence.armedThreadIds(for: saved.environmentId)
+                fingerprints: persistence.fingerprints(for: current.environmentId),
+                armedThreadIds: persistence.armedThreadIds(for: current.environmentId)
             )
             reviewTracker = DoneReviewTracker(
-                unreviewedFingerprints: persistence.unreviewedFingerprints(for: saved.environmentId)
+                unreviewedFingerprints: persistence.unreviewedFingerprints(for: current.environmentId)
             )
             logger.notice("Starting background polling")
             startPolling()
@@ -270,9 +275,7 @@ final class AppModel: ObservableObject {
         requestId: String,
         decision: ApprovalDecision
     ) async {
-        guard let connection, let accessToken else { return }
-        do {
-            errorMessage = nil
+        await performInteraction { connection, accessToken in
             try await source.respondToApproval(
                 threadId: activity.id,
                 requestId: requestId,
@@ -280,9 +283,6 @@ final class AppModel: ObservableObject {
                 configuration: connection,
                 accessToken: accessToken
             )
-            await pollOnce()
-        } catch {
-            errorMessage = error.localizedDescription
         }
     }
 
@@ -291,9 +291,7 @@ final class AppModel: ObservableObject {
         requestId: String,
         answers: [String: UserInputAnswer]
     ) async {
-        guard let connection, let accessToken else { return }
-        do {
-            errorMessage = nil
+        await performInteraction { connection, accessToken in
             try await source.respondToUserInput(
                 threadId: activity.id,
                 requestId: requestId,
@@ -301,6 +299,38 @@ final class AppModel: ObservableObject {
                 configuration: connection,
                 accessToken: accessToken
             )
+        }
+    }
+
+    func dismissUserInput(in activity: AgentActivity, requestId: String) async {
+        await performInteraction { connection, accessToken in
+            try await source.dismissUserInput(
+                threadId: activity.id,
+                requestId: requestId,
+                configuration: connection,
+                accessToken: accessToken
+            )
+        }
+    }
+
+    func stop(_ activity: AgentActivity) async {
+        await performInteraction { connection, accessToken in
+            try await source.interruptTurn(
+                threadId: activity.id,
+                turnId: activity.interruptTurnId,
+                configuration: connection,
+                accessToken: accessToken
+            )
+        }
+    }
+
+    private func performInteraction(
+        _ operation: (ConnectionConfiguration, String) async throws -> Void
+    ) async {
+        guard let connection, let accessToken else { return }
+        do {
+            errorMessage = nil
+            try await operation(connection, accessToken)
             await pollOnce()
         } catch {
             errorMessage = error.localizedDescription
@@ -374,6 +404,14 @@ final class AppModel: ObservableObject {
         await respondToUserInput(in: activity, requestId: requestId, answers: answers)
     }
 
+    private func dismissUserInput(
+        in target: NotificationThreadTarget,
+        requestId: String
+    ) async {
+        guard let activity = activity(for: target) else { return }
+        await dismissUserInput(in: activity, requestId: requestId)
+    }
+
     private func markRead(_ target: NotificationThreadTarget) {
         guard let activity = activities.first(where: {
             $0.id == target.threadId && $0.fingerprint == target.fingerprint
@@ -417,11 +455,15 @@ final class AppModel: ObservableObject {
             environmentId: connection.environmentId,
             changeRequestsByThreadId: snapshot.changeRequestsByThreadId,
             interactionsByThreadId: snapshot.interactionsByThreadId,
-            latestMessagesByThreadId: snapshot.latestMessagesByThreadId
+            latestMessagesByThreadId: snapshot.latestMessagesByThreadId,
+            usesServerAutoSettlement: connection.capabilities.threadAutoSettlement == true,
+            usesServerSnooze: connection.capabilities.threadSnooze == true
         )
         let transitions = tracker.observe(projected)
-        projectedActivities = projected
-        activities = reviewTracker.update(activities: projected, transitions: transitions)
+        _ = reviewTracker.update(activities: projected, transitions: transitions)
+        let visible = projected.filter { !$0.isSnoozed }
+        projectedActivities = visible
+        activities = reviewTracker.visibleActivities(from: visible)
         persistence.save(
             unreviewedFingerprints: reviewTracker.unreviewedFingerprints,
             for: connection.environmentId

@@ -102,11 +102,18 @@ public struct PendingUserInput: Equatable, Sendable {
     public let requestId: String
     public let createdAt: String
     public let questions: [UserInputQuestion]
+    public let dismissible: Bool
 
-    public init(requestId: String, createdAt: String, questions: [UserInputQuestion]) {
+    public init(
+        requestId: String,
+        createdAt: String,
+        questions: [UserInputQuestion],
+        dismissible: Bool = false
+    ) {
         self.requestId = requestId
         self.createdAt = createdAt
         self.questions = questions
+        self.dismissible = dismissible
     }
 }
 
@@ -176,9 +183,14 @@ struct ThreadInteractionPayload: Decodable {
     let appName: String?
     let options: [ApprovalOption]?
     let questions: [UserInputQuestion]?
+    let responseMode: String?
 }
 
 struct ThreadInteractionProjection: Sendable {
+    private enum ResponseMode: String {
+        case message
+    }
+
     func project(_ activities: [ThreadInteractionActivity]) -> PendingThreadInteractions {
         var approvals: [String: PendingApproval] = [:]
         var userInputs: [String: PendingUserInput] = [:]
@@ -205,7 +217,9 @@ struct ThreadInteractionProjection: Sendable {
                 userInputs[requestId] = PendingUserInput(
                     requestId: requestId,
                     createdAt: activity.createdAt,
-                    questions: questions
+                    questions: questions,
+                    dismissible: activity.payload?.responseMode
+                        .flatMap(ResponseMode.init(rawValue:)) == .message
                 )
             case "user-input.resolved":
                 userInputs.removeValue(forKey: requestId)
