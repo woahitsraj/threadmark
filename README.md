@@ -1,4 +1,7 @@
-# Threadmark for T3 Code
+# Threadmark for T3 Code (deprecated)
+
+> [!IMPORTANT]
+> Threadmark is deprecated and will not receive further updates. T3 Code now includes native notifications, so this companion app is no longer needed.
 
 [![CI](https://github.com/woahitsraj/threadmark/actions/workflows/ci.yml/badge.svg)](https://github.com/woahitsraj/threadmark/actions/workflows/ci.yml)
 
